@@ -1,0 +1,323 @@
+@import "tailwindcss";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  color-scheme: light;
+  --canvas: #f5f2ec;
+  --canvas-warm: #faf8f3;
+  --surface: #fffdfa;
+  --surface-soft: #eeeae2;
+  --surface-blue: #edf1f4;
+  --ink: #292721;
+  --ink-soft: #454139;
+  --muted: #827b71;
+  --muted-strong: #625d55;
+  --line: #ded8cf;
+  --line-strong: #c8c0b6;
+  --blue: #3f5366;
+  --blue-strong: #2c3e50;
+  --teal: #567466;
+  --teal-soft: #e8eee9;
+  --warning: #8a6228;
+  --warning-soft: #f7efdf;
+  --danger: #aa3f36;
+  --danger-soft: #f8ece9;
+  --chart-line: #4f73d9;
+  --chart-fill: #e8edfc;
+  --shadow-soft: 0 1px 2px rgb(41 39 33 / 0.035),
+    0 10px 28px rgb(41 39 33 / 0.04);
+  --shadow-float: 0 22px 60px rgb(41 39 33 / 0.09);
+}
+
+@theme inline {
+  --color-background: var(--canvas);
+  --color-foreground: var(--ink);
+  --font-sans: var(--font-manrope);
+  --font-mono: var(--font-plex-mono);
+  --color-blue-50: #edf1f4;
+  --color-blue-100: #e1e8ec;
+  --color-blue-200: #cbd6dc;
+  --color-blue-300: #acbcc5;
+  --color-blue-600: #4d6374;
+  --color-blue-700: #3f5366;
+  --color-blue-800: #31424f;
+  --color-blue-900: #283740;
+  --color-blue-950: #1f2a31;
+  --color-teal-100: #e5ede8;
+  --color-teal-200: #d2dfd7;
+  --color-teal-300: #b3c8bc;
+  --color-teal-400: #8faa9b;
+  --color-teal-500: #708f7f;
+  --color-teal-600: #567466;
+  --color-teal-700: #455f53;
+  --color-teal-800: #374c43;
+  --color-teal-900: #2e3f38;
+  --color-teal-950: #18231f;
+}
+
+* {
+  border-color: var(--line);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-manrope), Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    opacity 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 58%, transparent);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.landing-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--line) 68%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--line) 68%, transparent) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, black 0%, black 58%, transparent 96%);
+}
+
+.auth-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.06) 1px, transparent 1px);
+  background-size: 72px 100%;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.form-input {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 0.72rem 0.85rem;
+  color: var(--ink);
+  font-size: 0.925rem;
+  line-height: 1.45;
+  box-shadow: none;
+  outline: none;
+}
+
+.form-input::placeholder {
+  color: color-mix(in srgb, var(--muted) 75%, transparent);
+}
+
+.form-input:hover {
+  border-color: var(--line-strong);
+}
+
+.form-input:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.primary-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border-radius: 7px;
+  background: var(--ink);
+  padding: 0.7rem 1rem;
+  color: var(--surface);
+  font-size: 0.9rem;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 86%, var(--surface));
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  box-shadow: none;
+}
+
+.secondary-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 0.7rem 1rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.mono-label {
+  font-family: var(--font-plex-mono), monospace;
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.landing-reveal {
+  animation: landing-reveal 680ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-reveal-delay-1 {
+  animation-delay: 100ms;
+}
+
+.landing-reveal-delay-2 {
+  animation-delay: 190ms;
+}
+
+.landing-reveal-delay-3 {
+  animation-delay: 280ms;
+}
+
+.today-enter {
+  animation: today-enter 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.today-live-dot {
+  animation: today-pulse 2.4s ease-in-out infinite;
+}
+
+.typing-cursor {
+  animation: typing-cursor 760ms steps(1, end) infinite;
+}
+
+.today-scan {
+  position: relative;
+  isolation: isolate;
+}
+
+.today-scan::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0 auto 0 -28%;
+  width: 20%;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.07), transparent);
+  transform: skewX(-14deg);
+  animation: today-scan 7s ease-in-out infinite;
+}
+
+@keyframes landing-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes today-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes today-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes typing-cursor {
+  0%,
+  48% {
+    opacity: 1;
+  }
+  49%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes today-scan {
+  0%,
+  68% {
+    transform: translateX(0) skewX(-14deg);
+  }
+  92%,
+  100% {
+    transform: translateX(760%) skewX(-14deg);
+  }
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

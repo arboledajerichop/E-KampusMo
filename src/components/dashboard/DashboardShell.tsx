@@ -253,8 +253,8 @@ export default function DashboardShell({
           pathname={pathname}
         />
         <Link
-          href="/dashboard/calendar/new"
-          aria-label="Add a class schedule"
+          href="/dashboard/calendar"
+          aria-label="Open class schedule and registration form importer"
           className="flex flex-col items-center gap-1 py-1 text-[10px] font-bold text-[var(--ink)]"
         >
           <span className="-mt-5 grid h-11 w-11 place-items-center rounded-[8px] border-4 border-[var(--surface)] bg-[var(--ink)] text-[var(--surface)]">

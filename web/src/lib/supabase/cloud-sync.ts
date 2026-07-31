@@ -129,12 +129,16 @@ export async function runCloudTask<T>(
       emit({ state: "synced", message: "All changes synced" });
     }
     return { ok: true, value };
-  } catch (error) {
+    } catch (error) {
     activeTasks = Math.max(0, activeTasks - 1);
+
+    console.error("[E-KampusMo cloud sync failed]", error);
+
     emit({
       state: "error",
       message: "Cloud sync needs attention",
     });
+
     return { ok: false, error };
   }
 }

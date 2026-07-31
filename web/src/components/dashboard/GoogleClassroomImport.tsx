@@ -453,9 +453,9 @@ export default function GoogleClassroomImport({
               Google Classroom
             </h2>
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-              One current-semester view for active, missing, completed, and
-              undated work.
-            </p>
+            Set your current semester dates first, then connect Google Classroom
+            for accurate and up-to-date workload tracking.
+          </p>
           </div>
         </div>
 

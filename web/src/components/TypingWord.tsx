@@ -2,49 +2,73 @@
 
 import { useEffect, useState } from "react";
 
-const words = ["calm", "organized"] as const;
+const words = ["organized", "balanced"] as const;
 
 export default function TypingWord() {
   const [wordIndex, setWordIndex] = useState(0);
-  const [text, setText] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const word = words[wordIndex];
+  const [displayedWord, setDisplayedWord] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    const wordIsComplete = text === word;
-    const wordIsEmpty = text.length === 0;
-    const delay =
-      wordIsComplete && !deleting ? 1500 : deleting ? 55 : 95;
+    const currentWord = words[wordIndex];
+
+    let delay = isDeleting ? 55 : 90;
+
+    if (!isDeleting && displayedWord === currentWord) {
+      delay = 1600;
+    }
 
     const timer = window.setTimeout(() => {
-      if (wordIsComplete && !deleting) {
-        setDeleting(true);
+      if (!isDeleting && displayedWord.length < currentWord.length) {
+        setDisplayedWord(
+          currentWord.slice(0, displayedWord.length + 1),
+        );
         return;
       }
 
-      if (deleting && wordIsEmpty) {
-        setDeleting(false);
-        setWordIndex((current) => (current + 1) % words.length);
+      if (!isDeleting && displayedWord === currentWord) {
+        setIsDeleting(true);
         return;
       }
 
-      setText(
-        deleting
-          ? word.slice(0, Math.max(0, text.length - 1))
-          : word.slice(0, text.length + 1),
-      );
+      if (isDeleting && displayedWord.length > 0) {
+        setDisplayedWord(
+          currentWord.slice(0, displayedWord.length - 1),
+        );
+        return;
+      }
+
+      setIsDeleting(false);
+
+      setWordIndex((currentIndex) => {
+        return (currentIndex + 1) % words.length;
+      });
     }, delay);
 
-    return () => window.clearTimeout(timer);
-  }, [deleting, text, word]);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [displayedWord, isDeleting, wordIndex]);
 
   return (
-    <span className="inline-flex items-baseline whitespace-nowrap text-[var(--blue-strong)]">
-      {text}
+    <span className="inline-grid align-baseline text-[#6F9F73]">
       <span
         aria-hidden="true"
-        className="typing-cursor ml-1 inline-block h-[0.82em] w-[3px] translate-y-[0.05em] bg-current"
-      />
+        className="invisible col-start-1 row-start-1 whitespace-nowrap"
+      >
+        organized|
+      </span>
+
+      <span className="col-start-1 row-start-1 whitespace-nowrap">
+        {displayedWord}
+
+        <span
+          aria-hidden="true"
+          className="ml-[0.04em] inline-block animate-pulse font-normal text-[##6F9F73]"
+        >
+          |
+        </span>
+      </span>
     </span>
   );
 }

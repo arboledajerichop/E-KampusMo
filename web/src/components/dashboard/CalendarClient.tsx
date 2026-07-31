@@ -24,27 +24,84 @@ import { getSubjectPastel } from "@/lib/schedule/subject-colors";
 
 function formatTime(time: string) {
   const [hour, minute] = time.split(":").map(Number);
+
   return new Intl.DateTimeFormat("en-PH", {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(2026, 0, 1, hour, minute));
 }
 
-export default function CalendarClient({ userId }: { userId: string }) {
+const studentInformationFields = [
+  {
+    key: "studentName",
+    label: "Student name",
+    placeholder: "Juan Dela Cruz",
+  },
+  {
+    key: "studentNumber",
+    label: "Student number",
+    placeholder: "2026-00001",
+  },
+  {
+    key: "program",
+    label: "Program",
+    placeholder: "BS Information Technology",
+  },
+  {
+    key: "term",
+    label: "Term",
+    placeholder: "1st Semester 2026–2027",
+  },
+] as const;
+
+export default function CalendarClient({
+  userId,
+}: {
+  userId: string;
+}) {
   const confirm = useConfirmation();
+
   const { subjects, schedules } = useAcademicData(userId);
   const identity = useClassScheduleIdentity(userId);
+
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
-  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(
-    null,
+  const [editingScheduleId, setEditingScheduleId] = useState<
+    string | null
+  >(null);
+
+  const subjectsById = new Map(
+    subjects.map((subject) => [subject.id, subject]),
   );
-  const subjectsById = new Map(subjects.map((subject) => [subject.id, subject]));
-  const uniqueSubjects = getUniqueScheduledSubjects(subjects, schedules);
+
+  const uniqueSubjects = getUniqueScheduledSubjects(
+    subjects,
+    schedules,
+  );
+
   const totalUnits = getTotalScheduledUnits(subjects, schedules);
+
+  const missingStudentInformation =
+    studentInformationFields.filter(
+      ({ key }) => !identity[key].trim(),
+    );
+
+  const hasCompleteStudentInformation =
+    missingStudentInformation.length === 0;
+
+  const hasAtLeastOneClass = schedules.length > 0;
+
+  const canDownloadPdf =
+    hasCompleteStudentInformation &&
+    hasAtLeastOneClass &&
+    !downloading;
+
   const editingSchedule = editingScheduleId
-    ? schedules.find((schedule) => schedule.id === editingScheduleId)
+    ? schedules.find(
+        (schedule) => schedule.id === editingScheduleId,
+      )
     : undefined;
+
   const editingSubject = editingSchedule
     ? subjectsById.get(editingSchedule.subjectId)
     : undefined;
@@ -53,24 +110,55 @@ export default function CalendarClient({ userId }: { userId: string }) {
     key: keyof ClassScheduleIdentity,
     value: string,
   ) {
-    saveClassScheduleIdentity(userId, { ...identity, [key]: value });
+    setDownloadError("");
+
+    saveClassScheduleIdentity(userId, {
+      ...identity,
+      [key]: value,
+    });
   }
 
-  async function handleDelete(scheduleId: string, subjectName: string) {
+  async function handleDelete(
+    scheduleId: string,
+    subjectName: string,
+  ) {
     const shouldProceed = await confirm({
       title: "Remove this class meeting?",
       message: `The ${subjectName} meeting will be permanently removed from your schedule after synchronization.`,
       confirmLabel: "Remove meeting",
       tone: "danger",
     });
+
     if (shouldProceed) {
       removeSchedule(userId, scheduleId);
     }
   }
 
   async function handleDownload() {
-    setDownloading(true);
     setDownloadError("");
+
+    if (!hasCompleteStudentInformation) {
+      const missingFields = missingStudentInformation
+        .map(({ label }) => label)
+        .join(", ");
+
+      setDownloadError(
+        `Complete the following required information: ${missingFields}.`,
+      );
+
+      return;
+    }
+
+    if (!hasAtLeastOneClass) {
+      setDownloadError(
+        "Add at least one class meeting before downloading your schedule.",
+      );
+
+      return;
+    }
+
+    setDownloading(true);
+
     try {
       await downloadClassSchedulePdf({
         identity,
@@ -92,26 +180,6 @@ export default function CalendarClient({ userId }: { userId: string }) {
         eyebrow="Monday–Sunday timetable"
         title="Class Schedule"
         description="Build your weekly class schedule manually or import a registration form, then download an organized PDF copy."
-        action={
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <button
-              type="button"
-              onClick={handleDownload}
-              disabled={downloading}
-              className="secondary-button w-full px-5 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-            >
-              <Icon name="folder" className="h-4 w-4" />
-              {downloading ? "Creating PDF…" : "Download PDF"}
-            </button>
-            <Link
-              href="/dashboard/calendar/new"
-              className="primary-button w-full px-5 sm:w-auto"
-            >
-              <Icon name="plus" className="h-4 w-4" />
-              Add class
-            </Link>
-          </div>
-        }
       />
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -125,7 +193,10 @@ export default function CalendarClient({ userId }: { userId: string }) {
             className="flex items-center justify-between gap-4 rounded-[11px] border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-xs"
           >
             <span className="text-[var(--muted)]">{label}</span>
-            <strong className="text-[var(--ink)]">{value}</strong>
+
+            <strong className="text-[var(--ink)]">
+              {value}
+            </strong>
           </div>
         ))}
       </div>
@@ -136,70 +207,80 @@ export default function CalendarClient({ userId }: { userId: string }) {
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--blue)]">
               Download details
             </p>
+
             <h2 className="mt-2 text-lg font-bold text-[var(--ink)]">
               Student information
             </h2>
           </div>
-          <p className="max-w-md text-xs leading-5 text-[var(--muted)]">
-            These header details stay in this browser and appear in the
-            downloaded schedule. They are not synchronized to Supabase.
-          </p>
+
+          
         </div>
+
         <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {(
-            [
-              ["studentName", "Student name", "Juan Dela Cruz"],
-              ["studentNumber", "Student number", "2026-00001"],
-              ["program", "Program", "BS Information Technology"],
-              ["term", "Term", "1st Semester 2026–2027"],
-            ] as const
-          ).map(([key, label, placeholder]) => (
-            <label
-              key={key}
-              className="text-sm font-bold text-[var(--ink-soft)]"
-            >
-              {label}
-              <input
-                value={identity[key]}
-                onChange={(event) => updateIdentity(key, event.target.value)}
-                placeholder={placeholder}
-                className="form-input mt-2"
-              />
-            </label>
-          ))}
+          {studentInformationFields.map(
+            ({ key, label, placeholder }) => {
+              const isEmpty = !identity[key].trim();
+
+              return (
+                <label
+                  key={key}
+                  className="text-sm font-bold text-[var(--ink-soft)]"
+                >
+                  <span>
+                    {label}
+
+                    <span
+                      aria-hidden="true"
+                      className="ml-1 text-[var(--danger)]"
+                    >
+                      *
+                    </span>
+                  </span>
+
+                  <input
+                    required
+                    aria-required="true"
+                    aria-invalid={isEmpty}
+                    value={identity[key]}
+                    onChange={(event) =>
+                      updateIdentity(key, event.target.value)
+                    }
+                    placeholder={placeholder}
+                    className={`form-input mt-2 ${
+                      isEmpty
+                        ? "border-[var(--danger)]"
+                        : ""
+                    }`}
+                  />
+                </label>
+              );
+            },
+          )}
         </div>
+
+        <p className="mt-4 text-xs text-[var(--muted)]">
+          <span className="font-bold text-[var(--danger)]">
+            *
+          </span>{" "}
+          All student-information fields are required to download
+          the PDF.
+        </p>
       </section>
 
       <RegistrationFormImporter userId={userId} />
 
-      {downloadError && (
-        <p
-          role="alert"
-          className="mt-4 rounded-[10px] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]"
-        >
-          {downloadError}
-        </p>
-      )}
+      {schedules.length === 0 ? (
+        <section className="mt-6 rounded-[16px] border border-dashed border-blue-300 bg-blue-50/60 p-6 text-center dark:border-blue-800 dark:bg-blue-950/20">
+          <h2 className="font-bold text-[var(--ink)]">
+            Your weekly schedule is empty
+          </h2>
 
-      {schedules.length === 0 && (
-        <section className="mt-6 flex flex-col items-center justify-between gap-4 rounded-[16px] border border-dashed border-blue-300 bg-blue-50/60 p-6 text-center sm:flex-row sm:text-left dark:border-blue-800 dark:bg-blue-950/20">
-          <div>
-            <h2 className="font-bold text-[var(--ink)]">
-              Your weekly schedule is empty
-            </h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Add classes manually or import a registration form above.
-            </p>
-          </div>
-          <Link
-            href="/dashboard/calendar/new"
-            className="primary-button shrink-0 px-5"
-          >
-            <Icon name="plus" className="h-4 w-4" />
-            Add first class
-          </Link>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Add at least one class meeting using the button at the
+            bottom before downloading your schedule.
+          </p>
         </section>
-      )}
+      ) : null}
 
       <section
         aria-label="Monday to Sunday class schedule"
@@ -207,7 +288,10 @@ export default function CalendarClient({ userId }: { userId: string }) {
       >
         {dayOptions.map((day) => {
           const daySchedules = schedules
-            .filter((schedule) => schedule.dayOfWeek === day.value)
+            .filter(
+              (schedule) =>
+                schedule.dayOfWeek === day.value,
+            )
             .sort((left, right) =>
               left.startTime.localeCompare(right.startTime),
             );
@@ -221,6 +305,7 @@ export default function CalendarClient({ userId }: { userId: string }) {
                 <h2 className="text-sm font-bold text-[var(--ink)]">
                   {day.label}
                 </h2>
+
                 <span className="text-[10px] font-semibold text-[var(--muted)]">
                   {daySchedules.length}
                 </span>
@@ -233,8 +318,15 @@ export default function CalendarClient({ userId }: { userId: string }) {
               ) : (
                 <div className="space-y-3 p-3">
                   {daySchedules.map((schedule) => {
-                    const subject = subjectsById.get(schedule.subjectId);
-                    const pastel = getSubjectPastel(subject, subjects);
+                    const subject = subjectsById.get(
+                      schedule.subjectId,
+                    );
+
+                    const pastel = getSubjectPastel(
+                      subject,
+                      subjects,
+                    );
+
                     const location =
                       [schedule.room, schedule.building]
                         .filter(Boolean)
@@ -257,47 +349,71 @@ export default function CalendarClient({ userId }: { userId: string }) {
                               backgroundColor: pastel.accent,
                             }}
                           />
+
                           <div className="min-w-0 flex-1">
                             <p
                               className="text-xs font-bold uppercase tracking-[0.08em]"
-                              style={{ color: pastel.text }}
+                              style={{
+                                color: pastel.text,
+                              }}
                             >
-                              {subject?.code || "No subject code"}
+                              {subject?.code ||
+                                "No subject code"}
                             </p>
+
                             <p className="mt-1 text-sm font-bold text-[var(--ink)]">
-                              {subject?.name ?? "Class meeting"}
+                              {subject?.name ??
+                                "Class meeting"}
                             </p>
+
                             <p className="mt-1 text-xs font-semibold text-[var(--ink-soft)]">
-                              {formatTime(schedule.startTime)}–
+                              {formatTime(
+                                schedule.startTime,
+                              )}
+                              –
                               {formatTime(schedule.endTime)}
                             </p>
+
                             <dl className="mt-3 space-y-1 text-[11px] leading-4 text-[var(--muted)]">
                               <div className="flex gap-1">
                                 <dt>Section:</dt>
+
                                 <dd className="font-semibold text-[var(--ink-soft)]">
                                   {subject?.classCode || "—"}
                                 </dd>
                               </div>
+
                               <div className="flex gap-1">
                                 <dt>Units:</dt>
+
                                 <dd className="font-semibold text-[var(--ink-soft)]">
                                   {subject?.units ?? "—"}
                                 </dd>
                               </div>
+
                               <div>
-                                <dt className="inline">Professor: </dt>
+                                <dt className="inline">
+                                  Professor:{" "}
+                                </dt>
+
                                 <dd className="inline font-semibold text-[var(--ink-soft)]">
-                                  {subject?.instructorName || "—"}
+                                  {subject?.instructorName ||
+                                    "—"}
                                 </dd>
                               </div>
+
                               <div>
-                                <dt className="inline">Location: </dt>
+                                <dt className="inline">
+                                  Location:{" "}
+                                </dt>
+
                                 <dd className="inline font-semibold capitalize text-[var(--ink-soft)]">
                                   {location}
                                 </dd>
                               </div>
                             </dl>
-                            {schedule.meetingLink && (
+
+                            {schedule.meetingLink ? (
                               <a
                                 href={schedule.meetingLink}
                                 target="_blank"
@@ -305,21 +421,33 @@ export default function CalendarClient({ userId }: { userId: string }) {
                                 className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-[var(--blue)]"
                               >
                                 Join class
-                                <Icon name="arrow" className="h-3 w-3" />
+
+                                <Icon
+                                  name="arrow"
+                                  className="h-3 w-3"
+                                />
                               </a>
-                            )}
+                            ) : null}
+
                             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
                               <button
                                 type="button"
                                 onClick={() =>
-                                  setEditingScheduleId(schedule.id)
+                                  setEditingScheduleId(
+                                    schedule.id,
+                                  )
                                 }
                                 disabled={!subject}
                                 className="inline-flex items-center gap-1 text-[11px] font-bold text-[var(--blue)] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                <Icon name="edit" className="h-3 w-3" />
+                                <Icon
+                                  name="edit"
+                                  className="h-3 w-3"
+                                />
+
                                 Edit class
                               </button>
+
                               <button
                                 type="button"
                                 onClick={() =>
@@ -345,7 +473,85 @@ export default function CalendarClient({ userId }: { userId: string }) {
         })}
       </section>
 
-      {editingSchedule && editingSubject && (
+      <section className="mt-8 rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-5 shadow-[var(--shadow-soft)] sm:p-6">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--blue)]">
+              PDF requirements
+            </p>
+
+            <h2 className="mt-2 text-lg font-bold text-[var(--ink)]">
+              Complete your schedule before downloading
+            </h2>
+
+            <div className="mt-4 space-y-2 text-sm">
+              <p
+                className={
+                  hasCompleteStudentInformation
+                    ? "font-semibold text-[#6f9f73]"
+                    : "text-[var(--muted)]"
+                }
+              >
+                {hasCompleteStudentInformation ? "✓" : "○"}{" "}
+                Complete all required student information
+              </p>
+
+              <p
+                className={
+                  hasAtLeastOneClass
+                    ? "font-semibold text-[#6f9f73]"
+                    : "text-[var(--muted)]"
+                }
+              >
+                {hasAtLeastOneClass ? "✓" : "○"} Add at
+                least one class meeting
+              </p>
+            </div>
+
+            {downloadError ? (
+              <p
+                role="alert"
+                className="mt-4 rounded-[10px] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]"
+              >
+                {downloadError}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+            <Link
+              href="/dashboard/calendar/new"
+              className="secondary-button w-full px-5 sm:w-auto"
+            >
+              <Icon name="plus" className="h-4 w-4" />
+
+              Add class
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => void handleDownload()}
+              disabled={!canDownloadPdf}
+              title={
+                !hasCompleteStudentInformation
+                  ? "Complete all required student information first."
+                  : !hasAtLeastOneClass
+                    ? "Add at least one class meeting first."
+                    : undefined
+              }
+              className="primary-button w-full px-5 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
+            >
+              <Icon name="folder" className="h-4 w-4" />
+
+              {downloading
+                ? "Creating PDF…"
+                : "Download PDF"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {editingSchedule && editingSubject ? (
         <EditClassDialog
           key={editingSchedule.id}
           userId={userId}
@@ -354,7 +560,7 @@ export default function CalendarClient({ userId }: { userId: string }) {
           schedules={schedules}
           onClose={() => setEditingScheduleId(null)}
         />
-      )}
+      ) : null}
     </>
   );
 }

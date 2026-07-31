@@ -1,6 +1,11 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import {
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from "react";
 import Icon from "@/components/Icons";
 import { useConfirmation } from "@/components/dashboard/ConfirmationDialog";
 import DashboardPageHeader from "@/components/dashboard/DashboardPageHeader";
@@ -19,7 +24,7 @@ import {
   type ExpenseCategory,
 } from "@/lib/offline/finance-store";
 
-type ExpensePeriod = "today" | "week" | "month";
+type ExpensePeriod = "day" | "week" | "month";
 type AllowanceFrequency = "weekly" | "biweekly" | "monthly" | "custom";
 
 type DateRange = {
@@ -34,11 +39,28 @@ type TrendPoint = {
   totalCentavos: number;
 };
 
+type ExpenseHistoryGroup = {
+  monthKey: string;
+  label: string;
+  totalCentavos: number;
+  expenses: Expense[];
+};
+
 const periodOptions: { value: ExpensePeriod; label: string }[] = [
-  { value: "today", label: "Today" },
-  { value: "week", label: "This week" },
-  { value: "month", label: "This month" },
+  { value: "day", label: "Day" },
+  { value: "week", label: "Week" },
+  { value: "month", label: "Month" },
 ];
+
+const subscribeToClient = () => () => {};
+
+function useIsClient() {
+  return useSyncExternalStore(
+    subscribeToClient,
+    () => true,
+    () => false,
+  );
+}
 
 const categoryColors: Record<ExpenseCategory, string> = {
   Food: "#3b82f6",
@@ -68,20 +90,53 @@ function formatDate(date: string, includeYear = true) {
   }).format(new Date(`${date}T00:00:00Z`));
 }
 
-function getDateRange(period: ExpensePeriod, today: string): DateRange {
-  if (period === "today") {
+function monthKeyFromDate(date: string) {
+  return date.slice(0, 7);
+}
+
+function formatMonthKey(monthKey: string) {
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${monthKey}-01T00:00:00Z`));
+}
+
+function getMonthBounds(monthKey: string, today: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const start = `${year}-${String(month).padStart(2, "0")}-01`;
+  const calendarEnd = new Date(Date.UTC(year, month, 0))
+    .toISOString()
+    .slice(0, 10);
+  const end = monthKey === monthKeyFromDate(today) ? today : calendarEnd;
+
+  return { start, end };
+}
+
+function getDateRange(
+  period: ExpensePeriod,
+  selectedDate: string,
+  selectedMonth: string,
+  today: string,
+): DateRange {
+  const monthBounds = getMonthBounds(selectedMonth, today);
+
+  if (period === "day") {
     return {
-      start: today,
-      end: today,
-      label: formatDate(today),
+      start: selectedDate,
+      end: selectedDate,
+      label: formatDate(selectedDate),
     };
   }
 
   if (period === "week") {
-    const date = new Date(`${today}T00:00:00Z`);
+    const date = new Date(`${selectedDate}T00:00:00Z`);
     const daysSinceMonday = (date.getUTCDay() + 6) % 7;
-    const start = shiftDate(today, -daysSinceMonday);
-    const end = shiftDate(start, 6);
+    const calendarStart = shiftDate(selectedDate, -daysSinceMonday);
+    const calendarEnd = shiftDate(calendarStart, 6);
+    const start =
+      calendarStart < monthBounds.start ? monthBounds.start : calendarStart;
+    const end = calendarEnd > monthBounds.end ? monthBounds.end : calendarEnd;
+
     return {
       start,
       end,
@@ -89,16 +144,10 @@ function getDateRange(period: ExpensePeriod, today: string): DateRange {
     };
   }
 
-  const [year, month] = today.split("-").map(Number);
-  const start = `${year}-${String(month).padStart(2, "0")}-01`;
-  const end = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
   return {
-    start,
-    end,
-    label: new Intl.DateTimeFormat("en-PH", {
-      month: "long",
-      year: "numeric",
-    }).format(new Date(`${start}T00:00:00Z`)),
+    start: monthBounds.start,
+    end: monthBounds.end,
+    label: formatMonthKey(selectedMonth),
   };
 }
 
@@ -131,12 +180,14 @@ function trendLabel(date: string, period: ExpensePeriod) {
       day: "numeric",
     }).format(value);
   }
-  return "Today";
+  return formatDate(date, false);
 }
 
 function DonutChart({
   categoryTotals,
   totalCentavos,
+  selectedCategory,
+  onSelectCategory,
 }: {
   categoryTotals: {
     name: ExpenseCategory;
@@ -144,6 +195,8 @@ function DonutChart({
     percentage: number;
   }[];
   totalCentavos: number;
+  selectedCategory: ExpenseCategory | null;
+  onSelectCategory: (category: ExpenseCategory | null) => void;
 }) {
   const radius = 72;
   const circumference = 2 * Math.PI * radius;
@@ -166,6 +219,13 @@ function DonutChart({
       dashOffset: -previousFraction * circumference,
     };
   });
+  const selectedItem =
+    categoryTotals.find((item) => item.name === selectedCategory) ?? null;
+  const centerTotal = selectedItem?.totalCentavos ?? totalCentavos;
+
+  function handleSelect(category: ExpenseCategory) {
+    onSelectCategory(selectedCategory === category ? null : category);
+  }
 
   return (
     <div className="mt-5 grid items-center gap-6 sm:grid-cols-[210px_1fr] 2xl:grid-cols-1">
@@ -174,7 +234,7 @@ function DonutChart({
           viewBox="0 0 180 180"
           role="img"
           aria-label={`Spending by category, ${formatPeso(totalCentavos)} total`}
-          className="h-full w-full -rotate-90"
+          className="h-full w-full -rotate-90 overflow-visible"
         >
           <circle
             cx="90"
@@ -185,6 +245,10 @@ function DonutChart({
             strokeWidth="22"
           />
           {segments.map((item) => {
+            const isSelected = selectedCategory === item.name;
+            const isDimmed =
+              selectedCategory !== null && selectedCategory !== item.name;
+
             return (
               <circle
                 key={item.name}
@@ -193,11 +257,27 @@ function DonutChart({
                 r={radius}
                 fill="none"
                 stroke={categoryColors[item.name]}
-                strokeWidth="22"
+                strokeWidth={isSelected ? 27 : 22}
                 strokeDasharray={`${item.segmentLength} ${
                   circumference - item.segmentLength
                 }`}
                 strokeDashoffset={item.dashOffset}
+                strokeLinecap="butt"
+                opacity={isDimmed ? 0.28 : 1}
+                role="button"
+                tabIndex={0}
+                aria-label={`${item.name}: ${formatPeso(
+                  item.totalCentavos,
+                )}, ${item.percentage}%`}
+                aria-pressed={isSelected}
+                onClick={() => handleSelect(item.name)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleSelect(item.name);
+                  }
+                }}
+                className="cursor-pointer outline-none transition-all duration-200 focus-visible:opacity-70"
               >
                 <title>
                   {item.name}: {item.percentage}% (
@@ -207,38 +287,75 @@ function DonutChart({
             );
           })}
         </svg>
-        <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
-              Total spent
-            </p>
-            <p className="mt-1 text-xl font-bold tracking-[-0.04em] text-[var(--ink)]">
-              {formatCompactPeso(totalCentavos)}
-            </p>
-          </div>
-        </div>
+
+        <button
+          type="button"
+          onClick={() => selectedItem && onSelectCategory(null)}
+          disabled={!selectedItem}
+          aria-label={
+            selectedItem
+              ? `Clear ${selectedItem.name} category selection`
+              : "Total spending"
+          }
+          className="absolute inset-[42px] grid place-items-center rounded-full text-center disabled:cursor-default"
+        >
+          <span>
+            <span className="block text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
+              {selectedItem?.name ?? "Total spent"}
+            </span>
+            <span className="mt-1 block text-xl font-bold tracking-[-0.04em] text-[var(--ink)]">
+              {formatCompactPeso(centerTotal)}
+            </span>
+            {selectedItem && (
+              <span className="mt-1 block text-[10px] font-semibold text-[var(--muted)]">
+                {selectedItem.percentage}% of this period · tap to reset
+              </span>
+            )}
+          </span>
+        </button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {categoryTotals.length === 0 ? (
           <p className="rounded-[10px] bg-[var(--surface-soft)] px-4 py-5 text-center text-sm leading-6 text-[var(--muted)]">
             Add an expense to see your category percentages.
           </p>
         ) : (
-          categoryTotals.map((item) => (
-            <div key={item.name} className="flex items-center gap-3">
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: categoryColors[item.name] }}
-              />
-              <p className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--ink-soft)]">
-                {item.name}
-              </p>
-              <p className="text-xs font-bold text-[var(--ink)]">
-                {item.percentage}%
-              </p>
-            </div>
-          ))
+          categoryTotals.map((item) => {
+            const isSelected = selectedCategory === item.name;
+            const isDimmed =
+              selectedCategory !== null && selectedCategory !== item.name;
+
+            return (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => handleSelect(item.name)}
+                aria-pressed={isSelected}
+                className={`flex w-full items-center gap-3 rounded-[9px] px-2.5 py-2 text-left transition ${
+                  isSelected
+                    ? "bg-[var(--surface-soft)] ring-1 ring-[var(--line)]"
+                    : "hover:bg-[var(--surface-soft)]"
+                } ${isDimmed ? "opacity-45" : "opacity-100"}`}
+              >
+                <span
+                  className="h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: categoryColors[item.name] }}
+                />
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--ink-soft)]">
+                  {item.name}
+                </span>
+                <span className="text-right">
+                  <span className="block text-xs font-bold text-[var(--ink)]">
+                    {formatPeso(item.totalCentavos)}
+                  </span>
+                  <span className="block text-[10px] font-semibold text-[var(--muted)]">
+                    {item.percentage}%
+                  </span>
+                </span>
+              </button>
+            );
+          })
         )}
       </div>
     </div>
@@ -372,8 +489,15 @@ function SpendingLineChart({
 export default function FinanceClient({ userId }: { userId: string }) {
   const confirm = useConfirmation();
   const { allowancePeriods, expenses } = useFinanceData(userId);
+  const isClient = useIsClient();
   const [today] = useState(dateTodayInManila);
-  const [period, setPeriod] = useState<ExpensePeriod>("today");
+  const currentMonth = monthKeyFromDate(today);
+  const [period, setPeriod] = useState<ExpensePeriod>("day");
+  const [dashboardMonth, setDashboardMonth] = useState(currentMonth);
+  const [dashboardDate, setDashboardDate] = useState(today);
+  const [selectedCategory, setSelectedCategory] =
+    useState<ExpenseCategory | null>(null);
+  const [historyMonth, setHistoryMonth] = useState<string>(currentMonth);
   const [showAllowance, setShowAllowance] = useState(false);
 
   const [expenseAmount, setExpenseAmount] = useState("");
@@ -391,9 +515,25 @@ export default function FinanceClient({ userId }: { userId: string }) {
   const [allowanceError, setAllowanceError] = useState("");
 
   const currentAllowance = getCurrentAllowance(allowancePeriods, today);
+
+  const dashboardMonthOptions = useMemo(() => {
+    const monthKeys = new Set(
+      expenses.map((expense) => monthKeyFromDate(expense.date)),
+    );
+    monthKeys.add(currentMonth);
+    return Array.from(monthKeys).sort((left, right) =>
+      right.localeCompare(left),
+    );
+  }, [currentMonth, expenses]);
+
+  const dashboardMonthBounds = useMemo(
+    () => getMonthBounds(dashboardMonth, today),
+    [dashboardMonth, today],
+  );
+
   const dateRange = useMemo(
-    () => getDateRange(period, today),
-    [period, today],
+    () => getDateRange(period, dashboardDate, dashboardMonth, today),
+    [dashboardDate, dashboardMonth, period, today],
   );
   const periodExpenses = useMemo(
     () =>
@@ -410,6 +550,16 @@ export default function FinanceClient({ userId }: { userId: string }) {
     [dateRange.end, dateRange.start, expenses],
   );
   const totalCentavos = periodExpenses.reduce(
+    (total, expense) => total + expense.amountCentavos,
+    0,
+  );
+  const dashboardYear = dashboardMonth.slice(0, 4);
+  const yearlyExpenses = useMemo(
+    () =>
+      expenses.filter((expense) => expense.date.startsWith(`${dashboardYear}-`)),
+    [dashboardYear, expenses],
+  );
+  const yearlyTotalCentavos = yearlyExpenses.reduce(
     (total, expense) => total + expense.amountCentavos,
     0,
   );
@@ -438,6 +588,81 @@ export default function FinanceClient({ userId }: { userId: string }) {
       .filter((expense) => expense.date === date)
       .reduce((total, expense) => total + expense.amountCentavos, 0),
   }));
+
+  const historyMonthOptions = useMemo(() => {
+    const monthKeys = new Set(
+      expenses.map((expense) => monthKeyFromDate(expense.date)),
+    );
+    monthKeys.add(monthKeyFromDate(today));
+    return Array.from(monthKeys).sort((left, right) =>
+      right.localeCompare(left),
+    );
+  }, [expenses, today]);
+
+  const historyExpenses = useMemo(
+    () =>
+      expenses
+        .filter(
+          (expense) =>
+            historyMonth === "all" ||
+            monthKeyFromDate(expense.date) === historyMonth,
+        )
+        .sort(
+          (left, right) =>
+            right.date.localeCompare(left.date) ||
+            right.createdAt.localeCompare(left.createdAt),
+        ),
+    [expenses, historyMonth],
+  );
+
+  const historyGroups = useMemo<ExpenseHistoryGroup[]>(() => {
+    const groups = new Map<string, Expense[]>();
+
+    historyExpenses.forEach((expense) => {
+      const monthKey = monthKeyFromDate(expense.date);
+      const group = groups.get(monthKey) ?? [];
+      group.push(expense);
+      groups.set(monthKey, group);
+    });
+
+    return Array.from(groups.entries())
+      .sort(([left], [right]) => right.localeCompare(left))
+      .map(([monthKey, monthExpenses]) => ({
+        monthKey,
+        label: formatMonthKey(monthKey),
+        totalCentavos: monthExpenses.reduce(
+          (total, expense) => total + expense.amountCentavos,
+          0,
+        ),
+        expenses: monthExpenses,
+      }));
+  }, [historyExpenses]);
+
+  function handleDashboardMonthChange(nextMonth: string) {
+    const nextBounds = getMonthBounds(nextMonth, today);
+    const latestExpenseDate = expenses
+      .filter((expense) => monthKeyFromDate(expense.date) === nextMonth)
+      .map((expense) => expense.date)
+      .sort((left, right) => right.localeCompare(left))[0];
+
+    setDashboardMonth(nextMonth);
+    setDashboardDate(
+      nextMonth === currentMonth
+        ? today
+        : latestExpenseDate ?? nextBounds.end,
+    );
+    setSelectedCategory(null);
+  }
+
+  function handleDashboardDateChange(nextDate: string) {
+    setDashboardDate(nextDate);
+    setSelectedCategory(null);
+  }
+
+  function handlePeriodChange(nextPeriod: ExpensePeriod) {
+    setPeriod(nextPeriod);
+    setSelectedCategory(null);
+  }
 
   async function handleExpenseSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -560,12 +785,30 @@ export default function FinanceClient({ userId }: { userId: string }) {
     }
   }
 
+  if (!isClient) {
+    return (
+      <>
+        <DashboardPageHeader
+          eyebrow="Money tracker"
+          title="Expenses"
+          description="Record what you spent and review any saved day, week, month, or year."
+        />
+        <section
+          aria-live="polite"
+          className="mt-5 rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-6 text-sm text-[var(--muted)]"
+        >
+          Loading your saved expense records…
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       <DashboardPageHeader
         eyebrow="Money tracker"
         title="Expenses"
-        description="Record what you spent and understand where your money goes today, this week, or this month."
+        description="Record what you spent and review any saved day, week, month, or year."
         action={
           <button
             type="button"
@@ -849,7 +1092,7 @@ export default function FinanceClient({ userId }: { userId: string }) {
 
         <div className="min-w-0">
           <section className="rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:p-5">
-            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--blue)]">
                   Spending dashboard
@@ -857,43 +1100,115 @@ export default function FinanceClient({ userId }: { userId: string }) {
                 <h2 className="mt-1 text-lg font-bold text-[var(--ink)]">
                   {dateRange.label}
                 </h2>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Browsing saved expenses from {formatMonthKey(dashboardMonth)}.
+                </p>
               </div>
-              <div
-                role="group"
-                aria-label="Expense period"
-                className="grid grid-cols-3 rounded-[11px] bg-[var(--surface-soft)] p-1"
-              >
-                {periodOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setPeriod(option.value)}
-                    aria-pressed={period === option.value}
-                    className={`min-h-9 rounded-[8px] px-3 text-xs font-bold ${
-                      period === option.value
-                        ? "bg-[var(--surface)] text-[var(--ink)] shadow-sm"
-                        : "text-[var(--muted)] hover:text-[var(--ink)]"
-                    }`}
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
+                <div>
+                  <label
+                    htmlFor="dashboard-expense-month"
+                    className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]"
                   >
-                    {option.label}
-                  </button>
-                ))}
+                    Month
+                  </label>
+                  <select
+                    id="dashboard-expense-month"
+                    value={dashboardMonth}
+                    onChange={(event) =>
+                      handleDashboardMonthChange(event.target.value)
+                    }
+                    className="form-input min-w-[190px] py-2 text-sm"
+                  >
+                    {dashboardMonthOptions.map((monthKey) => (
+                      <option key={monthKey} value={monthKey}>
+                        {formatMonthKey(monthKey)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {period !== "month" && (
+                  <div>
+                    <label
+                      htmlFor="dashboard-expense-date"
+                      className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]"
+                    >
+                      {period === "day" ? "Specific day" : "A day in the week"}
+                    </label>
+                    <input
+                      id="dashboard-expense-date"
+                      type="date"
+                      value={dashboardDate}
+                      min={dashboardMonthBounds.start}
+                      max={dashboardMonthBounds.end}
+                      onChange={(event) =>
+                        handleDashboardDateChange(event.target.value)
+                      }
+                      className="form-input min-w-[170px] py-2 text-sm"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">
+                    View
+                  </span>
+                  <div
+                    role="group"
+                    aria-label="Expense period"
+                    className="grid grid-cols-3 rounded-[11px] bg-[var(--surface-soft)] p-1"
+                  >
+                    {periodOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => handlePeriodChange(option.value)}
+                        aria-pressed={period === option.value}
+                        className={`min-h-9 rounded-[8px] px-3 text-xs font-bold ${
+                          period === option.value
+                            ? "bg-[var(--surface)] text-[var(--ink)] shadow-sm"
+                            : "text-[var(--muted)] hover:text-[var(--ink)]"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </section>
 
           <section
             aria-label="Expense summary"
-            className="mt-4 grid gap-4 sm:grid-cols-3"
+            className="mt-4 grid gap-4 sm:grid-cols-2 2xl:grid-cols-4"
           >
+            <article className="rounded-[15px] border border-[var(--line)] bg-[var(--surface)] p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
+                Selected period
+              </p>
+              <p className="mt-3 text-2xl font-bold tracking-[-0.04em] text-[var(--ink)]">
+                {formatPeso(totalCentavos)}
+              </p>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                {dateRange.label}
+              </p>
+            </article>
+
             <article className="rounded-[15px] border border-[var(--line)] bg-[var(--surface)] p-5">
               <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
                 Total expenses
               </p>
               <p className="mt-3 text-2xl font-bold tracking-[-0.04em] text-[var(--ink)]">
-                {formatPeso(totalCentavos)}
+                {formatPeso(yearlyTotalCentavos)}
+              </p>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Entire year of {dashboardYear}
               </p>
             </article>
+
             <article className="rounded-[15px] border border-[var(--line)] bg-[var(--surface)] p-5">
               <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
                 Transactions
@@ -901,7 +1216,11 @@ export default function FinanceClient({ userId }: { userId: string }) {
               <p className="mt-3 text-2xl font-bold tracking-[-0.04em] text-[var(--ink)]">
                 {periodExpenses.length}
               </p>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                {yearlyExpenses.length} in {dashboardYear}
+              </p>
             </article>
+
             <article className="rounded-[15px] border border-[var(--line)] bg-[var(--surface)] p-5">
               <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
                 Biggest category
@@ -928,6 +1247,8 @@ export default function FinanceClient({ userId }: { userId: string }) {
               <DonutChart
                 categoryTotals={categoryTotals}
                 totalCentavos={totalCentavos}
+                selectedCategory={selectedCategory}
+                onSelectCategory={setSelectedCategory}
               />
             </section>
 
@@ -939,11 +1260,11 @@ export default function FinanceClient({ userId }: { userId: string }) {
                 Total expenses over time
               </h2>
               <p className="mt-1 text-xs text-[var(--muted)]">
-                {period === "today"
-                  ? "Your total spending today"
+                {period === "day"
+                  ? `Spending recorded on ${formatDate(dashboardDate)}`
                   : period === "week"
-                    ? "Daily totals from Monday to Sunday"
-                    : "Daily totals for the current month"}
+                    ? "Daily totals for the selected week"
+                    : `Daily totals for ${formatMonthKey(dashboardMonth)}`}
               </p>
               <SpendingLineChart points={trendPoints} period={period} />
             </section>
@@ -952,75 +1273,128 @@ export default function FinanceClient({ userId }: { userId: string }) {
       </div>
 
       <section className="mt-5 overflow-hidden rounded-[16px] border border-[var(--line)] bg-[var(--surface)]">
-        <header className="flex items-center justify-between gap-4 border-b border-[var(--line)] px-5 py-4 sm:px-6">
+        <header className="flex flex-col gap-4 border-b border-[var(--line)] px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
             <h2 className="text-base font-bold text-[var(--ink)]">
               Expense history
             </h2>
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Transactions for {dateRange.label}
+            <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+              {historyMonth === "all"
+                ? "All saved transactions, organized by month and year."
+                : `Transactions for ${formatMonthKey(historyMonth)}.`}
             </p>
           </div>
-          <span className="rounded-full bg-[var(--surface-soft)] px-2.5 py-1 text-xs font-bold text-[var(--muted-strong)]">
-            {periodExpenses.length}
-          </span>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label
+              htmlFor="expense-history-month"
+              className="sr-only"
+            >
+              Expense history month
+            </label>
+            <select
+              id="expense-history-month"
+              value={historyMonth}
+              onChange={(event) => setHistoryMonth(event.target.value)}
+              className="form-input min-w-[220px] py-2 text-sm"
+            >
+              <option value="all">All months and years</option>
+              {historyMonthOptions.map((monthKey) => (
+                <option key={monthKey} value={monthKey}>
+                  {formatMonthKey(monthKey)}
+                </option>
+              ))}
+            </select>
+
+            <span className="self-start rounded-full bg-[var(--surface-soft)] px-3 py-2 text-xs font-bold text-[var(--muted-strong)] sm:self-auto">
+              {historyExpenses.length}{" "}
+              {historyExpenses.length === 1 ? "transaction" : "transactions"}
+            </span>
+          </div>
         </header>
 
-        {periodExpenses.length === 0 ? (
+        {historyExpenses.length === 0 ? (
           <div className="grid min-h-[220px] place-items-center p-8 text-center">
-            <div className="max-w-[330px]">
+            <div className="max-w-[360px]">
               <span className="mx-auto grid h-11 w-11 place-items-center rounded-[12px] bg-[var(--surface-blue)] text-[var(--blue)]">
                 <Icon name="wallet" className="h-5 w-5" />
               </span>
               <h3 className="mt-4 text-sm font-bold text-[var(--ink)]">
-                No expenses in this period
+                No expenses for this month
               </h3>
               <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
-                Use the quick entry form to add your first expense.
+                Your other months remain saved. Choose another month or add a
+                new expense using the quick entry form.
               </p>
             </div>
           </div>
         ) : (
-          <div className="divide-y divide-[var(--line)]">
-            {periodExpenses.map((expense) => (
-              <article
-                key={expense.id}
-                className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center sm:px-6"
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <span
-                    className="mt-0.5 h-9 w-1 shrink-0 rounded-full"
-                    style={{
-                      backgroundColor:
-                        categoryColors[expense.category] ??
-                        categoryColors.Other,
-                    }}
-                  />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-[var(--ink)]">
-                      {expense.description || expense.category}
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--muted)]">
-                      {expense.category} · {formatDate(expense.date)}
+          <div>
+            {historyGroups.map((group) => (
+              <div key={group.monthKey}>
+                {historyMonth === "all" && (
+                  <div className="flex flex-col gap-1 border-b border-[var(--line)] bg-[var(--surface-soft)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                    <div>
+                      <h3 className="text-sm font-bold text-[var(--ink)]">
+                        {group.label}
+                      </h3>
+                      <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                        {group.expenses.length}{" "}
+                        {group.expenses.length === 1
+                          ? "transaction"
+                          : "transactions"}
+                      </p>
+                    </div>
+                    <p className="text-sm font-bold text-[var(--ink)]">
+                      {formatPeso(group.totalCentavos)}
                     </p>
                   </div>
+                )}
+
+                <div className="divide-y divide-[var(--line)]">
+                  {group.expenses.map((expense) => (
+                    <article
+                      key={expense.id}
+                      className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center sm:px-6"
+                    >
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span
+                          className="mt-0.5 h-9 w-1 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor:
+                              categoryColors[expense.category] ??
+                              categoryColors.Other,
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-[var(--ink)]">
+                            {expense.description || expense.category}
+                          </p>
+                          <p className="mt-1 text-xs text-[var(--muted)]">
+                            {expense.category} · {formatDate(expense.date)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3 sm:justify-end">
+                        <p className="text-sm font-bold text-[var(--ink)]">
+                          −{formatPeso(expense.amountCentavos)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteExpense(expense)}
+                          aria-label={`Delete ${
+                            expense.description || expense.category
+                          } expense`}
+                          className="rounded-[7px] px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-                <div className="flex items-center justify-between gap-3 sm:justify-end">
-                  <p className="text-sm font-bold text-[var(--ink)]">
-                    −{formatPeso(expense.amountCentavos)}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteExpense(expense)}
-                    aria-label={`Delete ${
-                      expense.description || expense.category
-                    } expense`}
-                    className="rounded-[7px] px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </article>
+              </div>
             ))}
           </div>
         )}

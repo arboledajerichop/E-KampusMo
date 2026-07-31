@@ -1,6 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Brand from "@/components/Brand";
@@ -8,7 +12,7 @@ import Icon from "@/components/Icons";
 import LogoutButton from "@/components/auth/LogoutButton";
 import { useCloudSyncStatus } from "@/lib/supabase/cloud-sync";
 
-const primaryNav = [
+const dashboardNav = [
   { label: "Today", icon: "home", href: "/dashboard" },
   {
     label: "Class Schedule",
@@ -20,9 +24,11 @@ const primaryNav = [
     icon: "tasks",
     href: "/dashboard/assignments",
   },
-] as const;
-
-const studentLifeNav = [
+  {
+    label: "Notepad",
+    icon: "notepad",
+    href: "/dashboard/notepad",
+  },
   {
     label: "Internship",
     icon: "briefcase",
@@ -40,7 +46,7 @@ const studentLifeNav = [
   },
 ] as const;
 
-type NavigationItem = (typeof primaryNav)[number] | (typeof studentLifeNav)[number];
+type NavigationItem = (typeof dashboardNav)[number];
 
 function isCurrentPath(pathname: string, href: string) {
   if (href === "/dashboard") {
@@ -78,29 +84,30 @@ function NavigationLink({
   );
 }
 
-function MobileLink({
-  href,
-  label,
-  icon,
+function MobileNavigationLink({
+  item,
   pathname,
+  onNavigate,
 }: {
-  href: string;
-  label: string;
-  icon: Parameters<typeof Icon>[0]["name"];
+  item: NavigationItem;
   pathname: string;
+  onNavigate: () => void;
 }) {
-  const active = isCurrentPath(pathname, href);
+  const active = isCurrentPath(pathname, item.href);
 
   return (
     <Link
-      href={href}
+      href={item.href}
+      onClick={onNavigate}
       aria-current={active ? "page" : undefined}
-      className={`flex flex-col items-center gap-1 py-1 text-[10px] font-semibold ${
-        active ? "text-[var(--ink)]" : "text-[var(--muted)]"
+      className={`flex min-h-12 items-center gap-3 rounded-[10px] px-4 text-sm font-semibold transition-colors ${
+        active
+          ? "bg-[var(--ink)] text-[var(--surface)]"
+          : "text-[var(--muted-strong)] hover:bg-[var(--surface-soft)] hover:text-[var(--ink)]"
       }`}
     >
-      <Icon name={icon} className="h-5 w-5" />
-      {label}
+      <Icon name={item.icon} className="h-5 w-5 shrink-0" />
+      <span>{item.label}</span>
     </Link>
   );
 }
@@ -115,6 +122,28 @@ export default function DashboardShell({
   const pathname = usePathname();
   const firstInitial = fullName.slice(0, 1).toUpperCase();
   const syncStatus = useCloudSyncStatus();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) {
+      return;
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileMenuOpen(false);
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [mobileMenuOpen]);
 
   return (
     <div className="min-h-screen bg-[var(--canvas)] lg:grid lg:grid-cols-[72px_1fr]">
@@ -143,14 +172,12 @@ export default function DashboardShell({
           className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-hidden group-hover/sidebar:overflow-y-auto group-focus-within/sidebar:overflow-y-auto"
         >
           <div className="space-y-1">
-            {primaryNav.map((item) => (
-              <NavigationLink key={item.href} item={item} pathname={pathname} />
-            ))}
-          </div>
-
-          <div className="mt-2 space-y-1">
-            {studentLifeNav.map((item) => (
-              <NavigationLink key={item.href} item={item} pathname={pathname} />
+            {dashboardNav.map((item) => (
+              <NavigationLink
+                key={item.href}
+                item={item}
+                pathname={pathname}
+              />
             ))}
           </div>
         </nav>
@@ -174,10 +201,21 @@ export default function DashboardShell({
         </div>
       </aside>
 
-      <div className="min-w-0 pb-24 lg:pb-0">
+      <div className="min-w-0">
         <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--surface)_94%,transparent)] backdrop-blur-xl">
           <div className="mx-auto flex h-[68px] max-w-[1440px] items-center justify-between gap-4 px-5 sm:px-8 lg:px-10">
-            <div className="lg:hidden">
+            <div className="flex items-center gap-3 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(true)}
+                aria-label="Open dashboard menu"
+                aria-controls="mobile-dashboard-sidebar"
+                aria-expanded={mobileMenuOpen}
+                className="grid h-10 w-10 place-items-center rounded-[7px] border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:border-[var(--line-strong)] hover:bg-[var(--surface-soft)]"
+              >
+                <Icon name="menu" className="h-5 w-5" />
+              </button>
+
               <Brand
                 href="/dashboard"
                 ariaLabel="Go to dashboard home"
@@ -230,51 +268,116 @@ export default function DashboardShell({
 
         <main className="mx-auto max-w-[1440px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           {children}
-          <div className="mt-6 lg:hidden">
-            <LogoutButton />
-          </div>
         </main>
       </div>
 
-      <nav
-        aria-label="Mobile navigation"
-        className="fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 border-t border-[var(--line)] bg-[var(--surface)] px-2 pb-[max(0.45rem,env(safe-area-inset-bottom))] pt-2 lg:hidden"
-      >
-        <MobileLink
-          href="/dashboard"
-          label="Today"
-          icon="home"
-          pathname={pathname}
-        />
-        <MobileLink
-          href="/dashboard/calendar"
-          label="Schedule"
-          icon="calendar"
-          pathname={pathname}
-        />
-        <Link
-          href="/dashboard/calendar"
-          aria-label="Open class schedule and registration form importer"
-          className="flex flex-col items-center gap-1 py-1 text-[10px] font-bold text-[var(--ink)]"
-        >
-          <span className="-mt-5 grid h-11 w-11 place-items-center rounded-[8px] border-4 border-[var(--surface)] bg-[var(--ink)] text-[var(--surface)]">
-            <Icon name="plus" className="h-5 w-5" />
-          </span>
-          Add
-        </Link>
-        <MobileLink
-          href="/dashboard/internship"
-          label="Progress"
-          icon="briefcase"
-          pathname={pathname}
-        />
-        <MobileLink
-          href="/dashboard/settings"
-          label="More"
-          icon="menu"
-          pathname={pathname}
-        />
-      </nav>
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-[70] lg:hidden">
+          <button
+            type="button"
+            aria-label="Close dashboard menu"
+            onClick={() => setMobileMenuOpen(false)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+          />
+
+          <aside
+            id="mobile-dashboard-sidebar"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Dashboard navigation"
+            className="relative flex h-full w-[min(86vw,320px)] flex-col border-r border-[var(--line)] bg-[var(--surface)] shadow-[18px_0_45px_rgba(0,0,0,0.18)]"
+          >
+            <div className="flex h-[68px] items-center justify-between border-b border-[var(--line)] px-5">
+              <div className="flex items-center gap-3">
+                <Brand
+                  href="/dashboard"
+                  ariaLabel="Go to dashboard home"
+                  compact
+                />
+                <div className="leading-none">
+                  <span className="block text-[17px] font-extrabold tracking-[-0.035em] text-[var(--ink)]">
+                    E-KampusMo
+                  </span>
+                  <span className="mt-1 block font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--muted)]">
+                    Student companion
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close dashboard menu"
+                className="grid h-10 w-10 place-items-center rounded-[7px] border border-[var(--line)] bg-[var(--surface)] text-xl leading-none text-[var(--muted-strong)] hover:border-[var(--line-strong)] hover:bg-[var(--surface-soft)] hover:text-[var(--ink)]"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="border-b border-[var(--line)] px-5 py-4">
+              <p className="truncate text-sm font-bold text-[var(--ink)]">
+                {fullName}
+              </p>
+              <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-[var(--muted)]">
+                <Icon
+                  name={
+                    syncStatus.state === "offline" ||
+                    syncStatus.state === "error"
+                      ? "device"
+                      : "signal"
+                  }
+                  className={`h-4 w-4 ${
+                    syncStatus.state === "error"
+                      ? "text-[var(--danger)]"
+                      : syncStatus.state === "offline"
+                        ? "text-[var(--warning)]"
+                        : "text-[var(--teal)]"
+                  }`}
+                />
+                <span>{syncStatus.message}</span>
+              </div>
+            </div>
+
+            <nav
+              aria-label="Mobile student workspace"
+              className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
+            >
+              <div className="space-y-1">
+                {dashboardNav.map((item) => (
+                  <MobileNavigationLink
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    onNavigate={() => setMobileMenuOpen(false)}
+                  />
+                ))}
+              </div>
+            </nav>
+
+            <div className="border-t border-[var(--line)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <Link
+                href="/dashboard/settings"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-current={
+                  isCurrentPath(pathname, "/dashboard/settings")
+                    ? "page"
+                    : undefined
+                }
+                className={`mb-3 flex min-h-12 items-center gap-3 rounded-[10px] px-4 text-sm font-semibold ${
+                  isCurrentPath(pathname, "/dashboard/settings")
+                    ? "bg-[var(--ink)] text-[var(--surface)]"
+                    : "text-[var(--muted-strong)] hover:bg-[var(--surface-soft)] hover:text-[var(--ink)]"
+                }`}
+              >
+                <Icon name="settings" className="h-5 w-5 shrink-0" />
+                <span>Profile & settings</span>
+              </Link>
+
+              <LogoutButton />
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,7 +15,6 @@ E-KampusMo is a private student companion for managing class schedules, assignme
 - Internship placement setup, daily logs, absences, reflections, and completion-date forecasting
 - Expense and allowance tracking with daily, weekly, monthly, yearly, category, and history views
 - Reminders and personal notepad
-- Light mode, dark mode, keyboard focus, and reduced-motion support
 - Offline browser cache with Supabase cloud synchronization
 - Account deletion with email verification
 - Per-user rate limiting for sensitive account and Google Classroom routes
@@ -28,17 +27,12 @@ E-KampusMo is a private student companion for managing class schedules, assignme
 - React
 - TypeScript
 - Tailwind CSS
-- Next.js App Router
 
 ### Backend and Database
 
 - Supabase
 - PostgreSQL
-- Supabase Authentication
-- Supabase Row Level Security
-- Supabase Storage
 - Next.js Route Handlers
-- Supabase SSR
 
 ### APIs and Services
 
@@ -50,10 +44,8 @@ E-KampusMo is a private student companion for managing class schedules, assignme
 ### Development Tools
 
 - Node.js
-- npm
 - Git and GitHub
 - VS Code
-- Supabase CLI
 
 ## Data, Privacy, and Offline Support
 
@@ -88,29 +80,6 @@ Rate limits are enforced per user and action through the `consume_api_rate_limit
 
 Responses also include `Retry-After` and rate-limit headers. If the database limiter is temporarily unavailable during local development, the server uses a per-process fallback that resets when the process restarts.
 
-## Local Setup
-
-### Requirements
-
-- Node.js 20 or later
-- npm
-- A Supabase project
-- A Google Cloud project only if Google Classroom integration is enabled
-
-### Installation
-
-```bash
-git clone https://github.com/arboledajerichop/E-KampusMo.git
-cd E-KampusMo/web
-npm install
-npm run dev
-```
-
-Open:
-
-```text
-http://localhost:3000
-```
 
 ## Environment Variables
 
@@ -203,13 +172,6 @@ The forecast considers:
 - Nationwide Philippine non-working holidays
 
 The calculated date is an estimate and should still be verified with the school or employer.
-
-## Quality Checks
-
-```bash
-npm run lint
-npm run build
-```
 
 ## Deployment
 

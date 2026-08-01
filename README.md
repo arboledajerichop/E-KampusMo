@@ -124,20 +124,6 @@ The migrations configure:
 - Google Classroom preferences
 - API rate limiting
 
-## Authentication URLs
-
-For local development, configure these in Supabase Authentication:
-
-```text
-Site URL:
-http://localhost:3000
-
-Redirect URL:
-http://localhost:3000/auth/callback
-```
-
-For production, add the equivalent Vercel domain and callback URL.
-
 ## Google Classroom Setup
 
 1. Create or select a Google Cloud project.
@@ -173,17 +159,6 @@ The forecast considers:
 
 The calculated date is an estimate and should still be verified with the school or employer.
 
-## Deployment
-
-Recommended Vercel settings:
-
-```text
-Production branch: main
-Root Directory: web
-Framework: Next.js
-```
-
-Add production environment variables in Vercel, then configure the production redirect URLs in Supabase and Google Cloud.
 
 ## Security Notes
 

@@ -65,6 +65,8 @@ in filename order. The current migrations are:
 
 `../supabase/migrations/202607300004_google_classroom_connections.sql`
 
+`../supabase/migrations/202608180001_google_classroom_disconnect.sql`
+
 The first migration creates the record tables, explicit authenticated-role
 grants, Row Level Security policies, the profile trigger, and private
 `student-files` and `internship-photos` buckets. The second adds the Internship
@@ -78,11 +80,16 @@ current-semester start date and manual Classroom completion choices under Row
 Level Security. The seventh adds an authenticated, atomic API rate limiter for
 account-deletion and Google Classroom endpoints. The eighth stores announcement
 read states, and the ninth stores the encrypted Google Classroom connection per
-E-KampusMo account.
+E-KampusMo account. The tenth lets a signed-in student securely remove their
+own Classroom connection if the server-only database key is unavailable.
 
 Preferred migration workflow:
 
+Run these commands from the repository root (the folder containing
+`supabase/migrations`), not from `web`:
+
 ```bash
+cd ..
 npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push

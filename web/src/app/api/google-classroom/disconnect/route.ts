@@ -46,18 +46,28 @@ export async function POST(request: Request) {
     );
   }
 
-  clearPrivateCache("google-classroom-coursework", user.id);
+  let deleted = false;
   try {
-    await deleteStoredGoogleClassroomToken(user.id);
+    deleted = await deleteStoredGoogleClassroomToken(user.id);
   } catch {
-    return addRateLimitHeaders(
-      NextResponse.json(
-        { error: "Google Classroom could not be disconnected." },
-        { status: 500 },
-      ),
-      rateLimit,
-    );
+    // Fall back to the user-scoped database function below if the server-only
+    // client is unavailable or cannot complete the deletion.
   }
+
+  if (!deleted) {
+    const { error } = await supabase.rpc("disconnect_google_classroom");
+    if (error) {
+      return addRateLimitHeaders(
+        NextResponse.json(
+          { error: "Google Classroom could not be disconnected." },
+          { status: 500 },
+        ),
+        rateLimit,
+      );
+    }
+  }
+
+  clearPrivateCache("google-classroom-coursework", user.id);
   const response = NextResponse.json({ disconnected: true });
   response.headers.set("Cache-Control", "no-store");
   response.cookies.set(

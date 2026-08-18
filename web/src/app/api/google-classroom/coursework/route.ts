@@ -469,7 +469,12 @@ export async function GET(request: NextRequest) {
           limited ||= Boolean(nextWorkPage);
         })(),
 
+        // Announcements were introduced after the original Classroom
+        // integration. They are optional: an account authorized before that
+        // addition does not have this scope, so a 403 here must not prevent
+        // the user's assignments from loading.
         (async () => {
+          try {
           let nextAnnouncementPage: string | undefined;
           let announcementPages = 0;
           do {
@@ -506,6 +511,14 @@ export async function GET(request: NextRequest) {
             announcementPages += 1;
           } while (nextAnnouncementPage && announcementPages < 2);
           limited ||= Boolean(nextAnnouncementPage);
+          } catch (error) {
+            if (
+              !(error instanceof GoogleClassroomApiError) ||
+              error.status !== 403
+            ) {
+              throw error;
+            }
+          }
         })(),
       ]);
     }

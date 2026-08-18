@@ -12,6 +12,10 @@ import {
   queueCloudDelete,
   runCloudTask,
 } from "@/lib/supabase/cloud-sync";
+import {
+  getUniqueScheduleMeetings,
+  scheduleMeetingKey,
+} from "@/lib/schedule/schedule-meetings";
 
 export const dayOptions = [
   { value: 1, label: "Monday", short: "Mon" },
@@ -157,7 +161,9 @@ function parseAcademicData(serialized: string | null): AcademicData {
             classCode: subject.classCode ?? "",
           }))
         : [],
-      schedules: Array.isArray(parsed.schedules) ? parsed.schedules : [],
+      schedules: Array.isArray(parsed.schedules)
+        ? getUniqueScheduleMeetings(parsed.schedules as ClassSchedule[])
+        : [],
     };
   } catch {
     return EMPTY_DATA;
@@ -320,10 +326,27 @@ async function syncAcademicData(userId: string) {
     if (subjectsResult.error) throw subjectsResult.error;
     if (schedulesResult.error) throw schedulesResult.error;
 
+    const cloudSchedules = (schedulesResult.data ?? []).map(scheduleFromRow);
+    const uniqueCloudSchedules = getUniqueScheduleMeetings(cloudSchedules);
+    const uniqueScheduleIds = new Set(
+      uniqueCloudSchedules.map((schedule) => schedule.id),
+    );
+    const duplicateScheduleIds = cloudSchedules
+      .filter((schedule) => !uniqueScheduleIds.has(schedule.id))
+      .map((schedule) => schedule.id);
+    if (duplicateScheduleIds.length > 0) {
+      const { error } = await supabase
+        .from("class_schedules")
+        .delete()
+        .eq("user_id", userId)
+        .in("id", duplicateScheduleIds);
+      if (error) throw error;
+    }
+
     writeData(userId, {
       version: 1,
       subjects: (subjectsResult.data ?? []).map(subjectFromRow),
-      schedules: (schedulesResult.data ?? []).map(scheduleFromRow),
+      schedules: uniqueCloudSchedules,
     });
   });
 }
@@ -444,6 +467,10 @@ export function removeSubject(userId: string, subjectId: string) {
 
 export function addSchedule(userId: string, input: ScheduleInput) {
   const data = readAcademicData(userId);
+  const existing = data.schedules.find(
+    (schedule) => scheduleMeetingKey(schedule) === scheduleMeetingKey(input),
+  );
+  if (existing) return existing;
   const timestamp = new Date().toISOString();
   const schedule: ClassSchedule = {
     ...input,
@@ -464,8 +491,18 @@ export function addSchedule(userId: string, input: ScheduleInput) {
 export function addSchedules(userId: string, inputs: ScheduleInput[]) {
   if (inputs.length === 0) return [];
   const data = readAcademicData(userId);
+  const knownMeetingKeys = new Set(
+    data.schedules.map(scheduleMeetingKey),
+  );
+  const uniqueInputs = getUniqueScheduleMeetings(inputs).filter((input) => {
+    const key = scheduleMeetingKey(input);
+    if (knownMeetingKeys.has(key)) return false;
+    knownMeetingKeys.add(key);
+    return true;
+  });
+  if (uniqueInputs.length === 0) return [];
   const timestamp = new Date().toISOString();
-  const schedules = inputs.map(
+  const schedules = uniqueInputs.map(
     (input): ClassSchedule => ({
       ...input,
       id: createId(),

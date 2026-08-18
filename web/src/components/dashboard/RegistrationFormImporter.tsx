@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import Icon from "@/components/Icons";
 import { useConfirmation } from "@/components/dashboard/ConfirmationDialog";
 import {
@@ -34,6 +34,8 @@ export default function RegistrationFormImporter({
   const { subjects, schedules } = useAcademicData(userId);
   const [showImporter, setShowImporter] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
   const [progress, setProgress] = useState("");
   const [fileName, setFileName] = useState("");
   const [identity, setIdentity] = useState<ClassScheduleIdentity>({
@@ -92,6 +94,7 @@ export default function RegistrationFormImporter({
   }
 
   async function saveImportedSchedule() {
+    if (saveLock.current) return;
     setError("");
     setSuccess("");
     const validatedCourses: Array<{
@@ -173,18 +176,21 @@ export default function RegistrationFormImporter({
       }
     }
 
-    const shouldProceed = await confirm({
-      title: "Import this class schedule?",
-      message: `${plannedMeetings.length} meeting${
-        plannedMeetings.length === 1 ? "" : "s"
-      } from ${validatedCourses.length} reviewed subject${
-        validatedCourses.length === 1 ? "" : "s"
-      } will be added and synchronized with your account.`,
-      confirmLabel: "Import schedule",
-    });
-    if (!shouldProceed) return;
+    saveLock.current = true;
+    setSaving(true);
+    try {
+      const shouldProceed = await confirm({
+        title: "Import this class schedule?",
+        message: `${plannedMeetings.length} meeting${
+          plannedMeetings.length === 1 ? "" : "s"
+        } from ${validatedCourses.length} reviewed subject${
+          validatedCourses.length === 1 ? "" : "s"
+        } will be added and synchronized with your account.`,
+        confirmLabel: "Import schedule",
+      });
+      if (!shouldProceed) return;
 
-    const workingSubjects = [...subjects];
+      const workingSubjects = [...subjects];
     const subjectIdByCourseId = new Map<string, string>();
     for (const [index, validated] of validatedCourses.entries()) {
       const { course, subjectName, subjectCode, classCode, units } = validated;
@@ -227,8 +233,8 @@ export default function RegistrationFormImporter({
       subjectIdByCourseId.set(course.id, savedSubject.id);
     }
 
-    saveClassScheduleIdentity(userId, identity);
-    addSchedules(
+      saveClassScheduleIdentity(userId, identity);
+      const savedSchedules = addSchedules(
       userId,
       plannedMeetings.flatMap((meeting) => {
         const subjectId = subjectIdByCourseId.get(meeting.courseId);
@@ -252,14 +258,27 @@ export default function RegistrationFormImporter({
           : [];
       }),
     );
-    setSuccess(
-      `${plannedMeetings.length} meeting${
-        plannedMeetings.length === 1 ? "" : "s"
-      } added. The source file and extracted text were not uploaded or saved.`,
-    );
-    setCourses([]);
-    setRawText("");
-    setFileName("");
+      const skippedMeetings = plannedMeetings.length - savedSchedules.length;
+      setSuccess(
+        savedSchedules.length > 0
+          ? `${savedSchedules.length} new meeting${
+              savedSchedules.length === 1 ? "" : "s"
+            } added${
+              skippedMeetings > 0
+                ? `; ${skippedMeetings} identical meeting${
+                    skippedMeetings === 1 ? " was" : "s were"
+                  } skipped`
+                : ""
+            }. The source file and extracted text were not uploaded or saved.`
+          : "No new meetings were added because this schedule is already saved.",
+      );
+      setCourses([]);
+      setRawText("");
+      setFileName("");
+    } finally {
+      saveLock.current = false;
+      setSaving(false);
+    }
   }
 
   return (
@@ -547,9 +566,10 @@ export default function RegistrationFormImporter({
               <button
                 type="button"
                 onClick={() => void saveImportedSchedule()}
+                disabled={saving}
                 className="primary-button px-5"
               >
-                Save reviewed schedule
+                {saving ? "Saving schedule…" : "Save reviewed schedule"}
               </button>
             </div>
           )}

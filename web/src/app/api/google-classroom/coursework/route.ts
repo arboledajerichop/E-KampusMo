@@ -12,6 +12,10 @@ import {
   type GoogleClassroomToken,
 } from "@/lib/google-classroom/server";
 import {
+  GoogleClassroomApiError,
+  googleClassroomGet,
+} from "@/lib/google-classroom/request";
+import {
   addRateLimitHeaders,
   checkRateLimit,
   rateLimitedJson,
@@ -88,34 +92,7 @@ type StudentSubmissionsResponse = {
   nextPageToken?: string;
 };
 
-class GoogleClassroomApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
 class GoogleClassroomReconnectError extends Error {}
-
-function googleErrorMessage(
-  value: unknown,
-  fallback: string,
-) {
-  if (
-    value &&
-    typeof value === "object" &&
-    "error" in value &&
-    value.error &&
-    typeof value.error === "object" &&
-    "message" in value.error &&
-    typeof value.error.message === "string"
-  ) {
-    return value.error.message;
-  }
-  return fallback;
-}
 
 function dueAt(courseWork: GoogleCourseWork) {
   const date = courseWork.dueDate;
@@ -258,7 +235,7 @@ export async function GET(request: NextRequest) {
 
   let tokenChanged = false;
 
-    async function refreshToken() {
+  async function refreshToken() {
     if (!token) throw new GoogleClassroomReconnectError();
     try {
       token = await refreshGoogleClassroomToken(token);
@@ -270,30 +247,14 @@ export async function GET(request: NextRequest) {
 
   async function googleGet<T>(url: URL): Promise<T> {
     if (!token) throw new GoogleClassroomReconnectError();
-    let response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token.accessToken}` },
-      cache: "no-store",
+    return googleClassroomGet<T>({
+      url,
+      getAccessToken: () => {
+        if (!token) throw new GoogleClassroomReconnectError();
+        return token.accessToken;
+      },
+      refreshAccessToken: refreshToken,
     });
-
-    if (response.status === 401) {
-      await refreshToken();
-      response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token!.accessToken}` },
-        cache: "no-store",
-      });
-    }
-
-    const result = (await response.json()) as unknown;
-    if (!response.ok) {
-      throw new GoogleClassroomApiError(
-        response.status,
-        googleErrorMessage(
-          result,
-          "Google Classroom could not return this information.",
-        ),
-      );
-    }
-    return result as T;
   }
 
   try {
@@ -373,15 +334,14 @@ export async function GET(request: NextRequest) {
       string,
       Map<string, GoogleStudentSubmission>
     >();
-    await Promise.all(
-      courses.map(async (course) => {
-        const submissionsByCourseWork = new Map<
-          string,
-          GoogleStudentSubmission
-        >();
-        let nextSubmissionPage: string | undefined;
-        let submissionPages = 0;
-        do {
+    for (const course of courses) {
+      const submissionsByCourseWork = new Map<
+        string,
+        GoogleStudentSubmission
+      >();
+      let nextSubmissionPage: string | undefined;
+      let submissionPages = 0;
+      do {
           const url = new URL(
             `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(
               course.id,
@@ -397,22 +357,21 @@ export async function GET(request: NextRequest) {
             url.searchParams.set("pageToken", nextSubmissionPage);
           }
 
-          const result = await googleGet<StudentSubmissionsResponse>(url);
-          for (const submission of result.studentSubmissions ?? []) {
-            if (submission.courseWorkId) {
-              submissionsByCourseWork.set(
-                submission.courseWorkId,
-                submission,
-              );
-            }
+        const result = await googleGet<StudentSubmissionsResponse>(url);
+        for (const submission of result.studentSubmissions ?? []) {
+          if (submission.courseWorkId) {
+            submissionsByCourseWork.set(
+              submission.courseWorkId,
+              submission,
+            );
           }
-          nextSubmissionPage = result.nextPageToken;
-          submissionPages += 1;
-        } while (nextSubmissionPage && submissionPages < 5);
-        if (nextSubmissionPage) limited = true;
-        submissionsByCourse.set(course.id, submissionsByCourseWork);
-      }),
-    );
+        }
+        nextSubmissionPage = result.nextPageToken;
+        submissionPages += 1;
+      } while (nextSubmissionPage && submissionPages < 5);
+      if (nextSubmissionPage) limited = true;
+      submissionsByCourse.set(course.id, submissionsByCourseWork);
+    }
 
     for (const course of courses) {
       const submissionsByCourseWork =
@@ -512,10 +471,7 @@ export async function GET(request: NextRequest) {
           } while (nextAnnouncementPage && announcementPages < 2);
           limited ||= Boolean(nextAnnouncementPage);
           } catch (error) {
-            if (
-              !(error instanceof GoogleClassroomApiError) ||
-              error.status !== 403
-            ) {
+            if (error instanceof GoogleClassroomReconnectError) {
               throw error;
             }
           }

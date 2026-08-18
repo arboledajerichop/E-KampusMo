@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   CLASSROOM_TOKEN_COOKIE,
-  deleteStoredGoogleClassroomToken,
   googleClassroomCookieOptions,
 } from "@/lib/google-classroom/server";
 import {
@@ -46,25 +45,15 @@ export async function POST(request: Request) {
     );
   }
 
-  let deleted = false;
-  try {
-    deleted = await deleteStoredGoogleClassroomToken(user.id);
-  } catch {
-    // Fall back to the user-scoped database function below if the server-only
-    // client is unavailable or cannot complete the deletion.
-  }
-
-  if (!deleted) {
-    const { error } = await supabase.rpc("disconnect_google_classroom");
-    if (error) {
-      return addRateLimitHeaders(
-        NextResponse.json(
-          { error: "Google Classroom could not be disconnected." },
-          { status: 500 },
-        ),
-        rateLimit,
-      );
-    }
+  const { error } = await supabase.rpc("disconnect_google_classroom");
+  if (error) {
+    return addRateLimitHeaders(
+      NextResponse.json(
+        { error: "Google Classroom could not be disconnected." },
+        { status: 500 },
+      ),
+      rateLimit,
+    );
   }
 
   clearPrivateCache("google-classroom-coursework", user.id);

@@ -4,6 +4,7 @@ import {
   decryptGoogleClassroomToken,
   encryptGoogleClassroomToken,
   googleClassroomCookieOptions,
+  isGoogleClassroomConnectionRevoked,
   isGoogleClassroomConfigured,
   loadStoredGoogleClassroomToken,
   saveStoredGoogleClassroomToken,
@@ -165,9 +166,14 @@ export async function GET(request: NextRequest) {
   );
   let token = cookieToken?.userId === user.id ? cookieToken : null;
   try {
-    const storedToken = await loadStoredGoogleClassroomToken(user.id);
-    if (storedToken) token = storedToken;
-    else if (token) await saveStoredGoogleClassroomToken(token);
+    const revoked = await isGoogleClassroomConnectionRevoked(supabase, user.id);
+    if (revoked) {
+      token = null;
+    } else {
+      const storedToken = await loadStoredGoogleClassroomToken(user.id);
+      if (storedToken) token = storedToken;
+      else if (token) await saveStoredGoogleClassroomToken(token);
+    }
   } catch {
     // Keep using the encrypted browser cookie when the optional account
     // connection table is unavailable.

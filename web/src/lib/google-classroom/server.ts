@@ -4,7 +4,10 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto";
-import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
+import {
+  createClient as createSupabaseAdminClient,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 import { getSupabaseAdminKey } from "@/lib/supabase/admin-key";
 
 export const CLASSROOM_TOKEN_COOKIE = "ekampusmo-google-classroom";
@@ -233,6 +236,28 @@ export async function deleteStoredGoogleClassroomToken(userId: string) {
     .eq("user_id", userId);
   if (error) throw error;
   return true;
+}
+
+export async function isGoogleClassroomConnectionRevoked(
+  supabase: SupabaseClient,
+  userId: string,
+) {
+  const client = storedTokenClient();
+  if (client) {
+    const { data, error } = await client
+      .from("google_classroom_connection_revocations")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) return null;
+    return Boolean(data);
+  }
+
+  const { data, error } = await supabase.rpc(
+    "google_classroom_connection_is_revoked",
+  );
+  if (error) return null;
+  return data === true;
 }
 
 async function requestGoogleToken(

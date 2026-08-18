@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import {
   CLASSROOM_TOKEN_COOKIE,
   decryptGoogleClassroomToken,
+  isGoogleClassroomConnectionRevoked,
   isGoogleClassroomConfigured,
   loadStoredGoogleClassroomToken,
   saveStoredGoogleClassroomToken,
@@ -45,12 +46,19 @@ export async function GET(request: NextRequest) {
         request.cookies.get(CLASSROOM_TOKEN_COOKIE)?.value,
       )
     : null;
-  let token = cookieToken;
+  let token = null;
+  let revoked = false;
   try {
-    const storedToken = await loadStoredGoogleClassroomToken(user.id);
-    if (storedToken) token = storedToken;
-    else if (cookieToken?.userId === user.id) {
-      await saveStoredGoogleClassroomToken(cookieToken);
+    revoked = Boolean(
+      await isGoogleClassroomConnectionRevoked(supabase, user.id),
+    );
+    if (!revoked) {
+      const storedToken = await loadStoredGoogleClassroomToken(user.id);
+      if (storedToken) token = storedToken;
+      else if (cookieToken?.userId === user.id) {
+        await saveStoredGoogleClassroomToken(cookieToken);
+        token = cookieToken;
+      }
     }
   } catch {
     // The browser cookie remains a safe fallback while the optional account
@@ -63,7 +71,7 @@ export async function GET(request: NextRequest) {
   );
 
   const forceRefresh = request.nextUrl.searchParams.get("refresh") === "1";
-  return addRateLimitHeaders(NextResponse.json(
+  const response = NextResponse.json(
     { configured, connected },
     {
       headers: {
@@ -73,5 +81,19 @@ export async function GET(request: NextRequest) {
         Vary: "Cookie",
       },
     },
-  ), rateLimit);
+  );
+  if (revoked && cookieToken?.userId === user.id) {
+    response.cookies.set(
+      CLASSROOM_TOKEN_COOKIE,
+      "",
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: request.nextUrl.protocol === "https:",
+        path: "/",
+        maxAge: 0,
+      },
+    );
+  }
+  return addRateLimitHeaders(response, rateLimit);
 }

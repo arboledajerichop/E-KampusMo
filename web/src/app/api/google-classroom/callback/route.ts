@@ -96,6 +96,13 @@ export async function GET(request: NextRequest) {
       redirectUri: getGoogleClassroomRedirectUri(request),
       userId: user.id,
     });
+    const { error: reconnectError } = await supabase.rpc(
+      "reconnect_google_classroom",
+    );
+    if (reconnectError) {
+      // Keep the encrypted cookie fallback working while this migration is
+      // being deployed. The marker will be cleared on the next reconnect.
+    }
     try {
       await saveStoredGoogleClassroomToken(token);
     } catch {

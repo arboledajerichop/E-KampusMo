@@ -63,6 +63,9 @@ export async function GET(request: NextRequest) {
   } catch {
     // The browser cookie remains a safe fallback while the optional account
     // connection table is being provisioned.
+    if (cookieToken?.userId === user.id) {
+      token = cookieToken;
+    }
   }
   const connected = Boolean(
     token &&

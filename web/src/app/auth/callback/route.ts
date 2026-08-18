@@ -36,6 +36,10 @@ export async function GET(request: Request) {
 
       return NextResponse.redirect(`${origin}${next}`);
     }
+    console.error(
+      "Google sign-in callback failed:",
+      error.message,
+    );
   }
 
   return NextResponse.redirect(

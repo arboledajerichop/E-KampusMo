@@ -3,6 +3,8 @@ import {
   CLASSROOM_TOKEN_COOKIE,
   decryptGoogleClassroomToken,
   isGoogleClassroomConfigured,
+  loadStoredGoogleClassroomToken,
+  saveStoredGoogleClassroomToken,
 } from "@/lib/google-classroom/server";
 import {
   addRateLimitHeaders,
@@ -38,11 +40,22 @@ export async function GET(request: NextRequest) {
   }
 
   const configured = isGoogleClassroomConfigured();
-  const token = configured
+  const cookieToken = configured
     ? decryptGoogleClassroomToken(
         request.cookies.get(CLASSROOM_TOKEN_COOKIE)?.value,
       )
     : null;
+  let token = cookieToken;
+  try {
+    const storedToken = await loadStoredGoogleClassroomToken(user.id);
+    if (storedToken) token = storedToken;
+    else if (cookieToken?.userId === user.id) {
+      await saveStoredGoogleClassroomToken(cookieToken);
+    }
+  } catch {
+    // The browser cookie remains a safe fallback while the optional account
+    // connection table is being provisioned.
+  }
   const connected = Boolean(
     token &&
       token.userId === user.id &&

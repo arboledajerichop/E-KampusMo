@@ -17,14 +17,26 @@ type ClassroomWork = {
   submissionState: string | null;
 };
 
+type ClassroomAnnouncement = {
+  id: string;
+  courseId: string;
+  courseName: string;
+  text: string;
+  alternateLink: string;
+  creationTime: string | null;
+  updateTime: string | null;
+};
+
 type ClassroomResponse = {
   courseWork?: ClassroomWork[];
+  announcements?: ClassroomAnnouncement[];
   error?: string;
 };
 
 export type AssignmentReminder = {
   id: string;
   source: "ekampusmo" | "classroom";
+  kind: "assignment" | "announcement";
   title: string;
   courseName: string;
   description: string;
@@ -55,6 +67,7 @@ function classroomItemKey(item: ClassroomWork) {
 }
 
 export function reminderTiming(reminder: AssignmentReminder) {
+  if (reminder.kind === "announcement") return "New announcement";
   if (reminder.missing) return "Missing";
   const difference =
     manilaDayNumber(reminder.deadline) - manilaDayNumber(Date.now());
@@ -71,6 +84,7 @@ export function reminderTiming(reminder: AssignmentReminder) {
 }
 
 export function reminderGroup(reminder: AssignmentReminder) {
+  if (reminder.kind === "announcement") return "Announcements";
   if (reminder.missing) return "Missing";
   const difference =
     manilaDayNumber(reminder.deadline) - manilaDayNumber(Date.now());
@@ -92,6 +106,9 @@ export function useAssignmentReminders({
 }) {
   const preferences = useClassroomPreferences(userId);
   const [classroomWork, setClassroomWork] = useState<ClassroomWork[]>([]);
+  const [classroomAnnouncements, setClassroomAnnouncements] = useState<
+    ClassroomAnnouncement[]
+  >([]);
   const [classroomConnected, setClassroomConnected] = useState(false);
   const [loadingClassroom, setLoadingClassroom] = useState(true);
   const [classroomError, setClassroomError] = useState("");
@@ -126,6 +143,7 @@ export function useAssignmentReminders({
           );
         }
         if (active) setClassroomWork(result.courseWork ?? []);
+        if (active) setClassroomAnnouncements(result.announcements ?? []);
       } catch (reason) {
         if (active) {
           setClassroomError(
@@ -157,6 +175,9 @@ export function useAssignmentReminders({
     const completedClassroomItems = new Set(
       preferences.completedItemKeys,
     );
+    const readAnnouncementKeys = new Set(
+      preferences.readAnnouncementKeys,
+    );
     const classroomLinks = new Set(
       classroomWork
         .map((item) => item.alternateLink)
@@ -178,6 +199,7 @@ export function useAssignmentReminders({
         return {
           id: `manual:${assignment.id}`,
           source: "ekampusmo",
+          kind: "assignment",
           title: assignment.title,
           courseName:
             subject?.code || subject?.name || "E-KampusMo assignment",
@@ -206,6 +228,7 @@ export function useAssignmentReminders({
         return {
           id: `classroom:${classroomItemKey(item)}`,
           source: "classroom" as const,
+          kind: "assignment" as const,
           title: item.title,
           courseName: item.courseName,
           description: item.description,
@@ -215,16 +238,51 @@ export function useAssignmentReminders({
         };
       });
 
-    return [...manualReminders, ...classroomReminders].sort(
+    const classroomAnnouncementReminders: AssignmentReminder[] =
+      classroomAnnouncements
+        .filter((item) => {
+          const referenceDate = item.creationTime ?? item.updateTime;
+          if (
+            referenceDate &&
+            new Date(referenceDate).getTime() < semesterStart
+          ) {
+            return false;
+          }
+          return !readAnnouncementKeys.has(
+            item.courseId + "/" + item.id,
+          );
+        })
+        .map((item) => ({
+          id: "announcement:" + item.courseId + "/" + item.id,
+          source: "classroom" as const,
+          kind: "announcement" as const,
+          title: "Announcement",
+          courseName: item.courseName,
+          description: item.text,
+          deadline:
+            item.updateTime ??
+            item.creationTime ??
+            new Date(currentTimestamp).toISOString(),
+          href: item.alternateLink || "/dashboard/assignments",
+          missing: false,
+        }));
+
+    return [
+      ...classroomAnnouncementReminders,
+      ...manualReminders,
+      ...classroomReminders,
+    ].sort(
       (left, right) =>
         new Date(left.deadline).getTime() -
         new Date(right.deadline).getTime(),
     );
   }, [
     assignments,
+    classroomAnnouncements,
     classroomWork,
     currentTimestamp,
     preferences.completedItemKeys,
+    preferences.readAnnouncementKeys,
     preferences.semesterStart,
     subjects,
   ]);

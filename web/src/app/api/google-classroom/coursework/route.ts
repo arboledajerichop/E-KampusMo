@@ -5,6 +5,8 @@ import {
   encryptGoogleClassroomToken,
   googleClassroomCookieOptions,
   isGoogleClassroomConfigured,
+  loadStoredGoogleClassroomToken,
+  saveStoredGoogleClassroomToken,
   refreshGoogleClassroomToken,
   type GoogleClassroomToken,
 } from "@/lib/google-classroom/server";
@@ -49,6 +51,16 @@ type GoogleCourseWork = {
   };
 };
 
+type GoogleAnnouncement = {
+  id?: string;
+  courseId?: string;
+  text?: string;
+  alternateLink?: string;
+  creationTime?: string;
+  updateTime?: string;
+  state?: string;
+};
+
 type CoursesResponse = {
   courses?: GoogleCourse[];
   nextPageToken?: string;
@@ -56,6 +68,11 @@ type CoursesResponse = {
 
 type CourseWorkResponse = {
   courseWork?: GoogleCourseWork[];
+  nextPageToken?: string;
+};
+
+type AnnouncementsResponse = {
+  announcements?: GoogleAnnouncement[];
   nextPageToken?: string;
 };
 
@@ -143,10 +160,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  let token = decryptGoogleClassroomToken(
+  const cookieToken = decryptGoogleClassroomToken(
     request.cookies.get(CLASSROOM_TOKEN_COOKIE)?.value,
   );
-  if (!token || token.userId !== user.id) {
+  let token = cookieToken?.userId === user.id ? cookieToken : null;
+  try {
+    const storedToken = await loadStoredGoogleClassroomToken(user.id);
+    if (storedToken) token = storedToken;
+    else if (token) await saveStoredGoogleClassroomToken(token);
+  } catch {
+    // Keep using the encrypted browser cookie when the optional account
+    // connection table is unavailable.
+  }
+  if (!token) {
     return NextResponse.json(
       {
         error: "Connect Google Classroom before loading coursework.",
@@ -193,11 +219,24 @@ export async function GET(request: NextRequest) {
         submissionState: string | null;
         late: boolean;
       }>;
+      announcements?: Array<{
+        id: string;
+        courseId: string;
+        courseName: string;
+        text: string;
+        alternateLink: string;
+        creationTime: string | null;
+        updateTime: string | null;
+      }>;
       limited: boolean;
     }>(CLASSROOM_CACHE_NAMESPACE, user.id);
     if (cached) {
+      const cachedValue = {
+        ...cached.value,
+        announcements: cached.value.announcements ?? [],
+      };
       return addRateLimitHeaders(
-        NextResponse.json(cached.value, {
+        NextResponse.json(cachedValue, {
           headers: {
             "Cache-Control":
               "private, max-age=30, stale-while-revalidate=120",
@@ -213,7 +252,7 @@ export async function GET(request: NextRequest) {
 
   let tokenChanged = false;
 
-  async function refreshToken() {
+    async function refreshToken() {
     if (!token) throw new GoogleClassroomReconnectError();
     try {
       token = await refreshGoogleClassroomToken(token);
@@ -313,49 +352,72 @@ export async function GET(request: NextRequest) {
       submissionState: string | null;
       late: boolean;
     }> = [];
+    const announcements: Array<{
+      id: string;
+      courseId: string;
+      courseName: string;
+      text: string;
+      alternateLink: string;
+      creationTime: string | null;
+      updateTime: string | null;
+    }> = [];
     let limited = Boolean(nextCoursePage);
 
-    for (const course of courses) {
-      const submissionsByCourseWork = new Map<
-        string,
-        GoogleStudentSubmission
-      >();
-      let nextSubmissionPage: string | undefined;
-      let submissionPages = 0;
-      do {
-        const url = new URL(
-          `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(
-            course.id,
-          )}/courseWork/-/studentSubmissions`,
-        );
-        url.searchParams.set("userId", "me");
-        url.searchParams.set("pageSize", "100");
-        url.searchParams.set(
-          "fields",
-          "studentSubmissions(courseWorkId,state,late),nextPageToken",
-        );
-        if (nextSubmissionPage) {
-          url.searchParams.set("pageToken", nextSubmissionPage);
-        }
-
-        const result =
-          await googleGet<StudentSubmissionsResponse>(url);
-        for (const submission of result.studentSubmissions ?? []) {
-          if (submission.courseWorkId) {
-            submissionsByCourseWork.set(
-              submission.courseWorkId,
-              submission,
-            );
+    const submissionsByCourse = new Map<
+      string,
+      Map<string, GoogleStudentSubmission>
+    >();
+    await Promise.all(
+      courses.map(async (course) => {
+        const submissionsByCourseWork = new Map<
+          string,
+          GoogleStudentSubmission
+        >();
+        let nextSubmissionPage: string | undefined;
+        let submissionPages = 0;
+        do {
+          const url = new URL(
+            `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(
+              course.id,
+            )}/courseWork/-/studentSubmissions`,
+          );
+          url.searchParams.set("userId", "me");
+          url.searchParams.set("pageSize", "100");
+          url.searchParams.set(
+            "fields",
+            "studentSubmissions(courseWorkId,state,late),nextPageToken",
+          );
+          if (nextSubmissionPage) {
+            url.searchParams.set("pageToken", nextSubmissionPage);
           }
-        }
-        nextSubmissionPage = result.nextPageToken;
-        submissionPages += 1;
-      } while (nextSubmissionPage && submissionPages < 5);
-      limited ||= Boolean(nextSubmissionPage);
 
-      let nextWorkPage: string | undefined;
-      let workPages = 0;
-      do {
+          const result = await googleGet<StudentSubmissionsResponse>(url);
+          for (const submission of result.studentSubmissions ?? []) {
+            if (submission.courseWorkId) {
+              submissionsByCourseWork.set(
+                submission.courseWorkId,
+                submission,
+              );
+            }
+          }
+          nextSubmissionPage = result.nextPageToken;
+          submissionPages += 1;
+        } while (nextSubmissionPage && submissionPages < 5);
+        if (nextSubmissionPage) limited = true;
+        submissionsByCourse.set(course.id, submissionsByCourseWork);
+      }),
+    );
+
+    for (const course of courses) {
+      const submissionsByCourseWork =
+        submissionsByCourse.get(course.id) ??
+        new Map<string, GoogleStudentSubmission>();
+
+      await Promise.all([
+        (async () => {
+          let nextWorkPage: string | undefined;
+          let workPages = 0;
+          do {
         const url = new URL(
           `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(
             course.id,
@@ -372,33 +434,74 @@ export async function GET(request: NextRequest) {
           url.searchParams.set("pageToken", nextWorkPage);
         }
 
-        const result = await googleGet<CourseWorkResponse>(url);
-        for (const item of result.courseWork ?? []) {
-          if (!item.id || !item.title) continue;
-          const submission = submissionsByCourseWork.get(item.id);
-          courseWork.push({
-            id: item.id,
-            courseId: course.id,
-            courseName: course.name,
-            title: item.title,
-            description: item.description ?? "",
-            alternateLink: item.alternateLink ?? "",
-            workType: item.workType ?? "COURSE_WORK_TYPE_UNSPECIFIED",
-            maxPoints:
-              typeof item.maxPoints === "number"
-                ? item.maxPoints
-                : null,
-            dueAt: dueAt(item),
-            creationTime: item.creationTime ?? null,
-            courseState: course.courseState,
-            submissionState: submission?.state ?? null,
-            late: submission?.late ?? false,
-          });
+            const result = await googleGet<CourseWorkResponse>(url);
+            for (const item of result.courseWork ?? []) {
+              if (!item.id || !item.title) continue;
+              const submission = submissionsByCourseWork.get(item.id);
+              courseWork.push({
+                id: item.id,
+                courseId: course.id,
+                courseName: course.name,
+                title: item.title,
+                description: item.description ?? "",
+                alternateLink: item.alternateLink ?? "",
+                workType: item.workType ?? "COURSE_WORK_TYPE_UNSPECIFIED",
+                maxPoints:
+                  typeof item.maxPoints === "number"
+                    ? item.maxPoints
+                    : null,
+                dueAt: dueAt(item),
+                creationTime: item.creationTime ?? null,
+                courseState: course.courseState,
+                submissionState: submission?.state ?? null,
+                late: submission?.late ?? false,
+              });
+            }
+            nextWorkPage = result.nextPageToken;
+            workPages += 1;
+          } while (nextWorkPage && workPages < 2);
+          limited ||= Boolean(nextWorkPage);
+        })(),
+
+        (async () => {
+          let nextAnnouncementPage: string | undefined;
+          let announcementPages = 0;
+          do {
+        const url = new URL(
+          `https://classroom.googleapis.com/v1/courses/${encodeURIComponent(
+            course.id,
+          )}/announcements`,
+        );
+        url.searchParams.set("announcementStates", "PUBLISHED");
+        url.searchParams.set("orderBy", "updateTime desc");
+        url.searchParams.set("pageSize", "100");
+        url.searchParams.set(
+          "fields",
+          "announcements(id,courseId,text,alternateLink,creationTime,updateTime,state),nextPageToken",
+        );
+        if (nextAnnouncementPage) {
+          url.searchParams.set("pageToken", nextAnnouncementPage);
         }
-        nextWorkPage = result.nextPageToken;
-        workPages += 1;
-      } while (nextWorkPage && workPages < 2);
-      limited ||= Boolean(nextWorkPage);
+
+            const result = await googleGet<AnnouncementsResponse>(url);
+            for (const announcement of result.announcements ?? []) {
+              if (!announcement.id || announcement.state === "DELETED") continue;
+              announcements.push({
+                id: announcement.id,
+                courseId: announcement.courseId ?? course.id,
+                courseName: course.name,
+                text: announcement.text ?? "",
+                alternateLink: announcement.alternateLink ?? "",
+                creationTime: announcement.creationTime ?? null,
+                updateTime: announcement.updateTime ?? null,
+              });
+            }
+            nextAnnouncementPage = result.nextPageToken;
+            announcementPages += 1;
+          } while (nextAnnouncementPage && announcementPages < 2);
+          limited ||= Boolean(nextAnnouncementPage);
+        })(),
+      ]);
     }
 
     const now = Date.now();
@@ -420,8 +523,17 @@ export async function GET(request: NextRequest) {
       }
       return leftTime - rightTime;
     });
+    announcements.sort((left, right) => {
+      const leftTime = new Date(
+        left.updateTime ?? left.creationTime ?? 0,
+      ).getTime();
+      const rightTime = new Date(
+        right.updateTime ?? right.creationTime ?? 0,
+      ).getTime();
+      return rightTime - leftTime;
+    });
 
-    const payload = { courses, courseWork, limited };
+    const payload = { courses, courseWork, announcements, limited };
     writePrivateCache(
       CLASSROOM_CACHE_NAMESPACE,
       user.id,
@@ -440,6 +552,11 @@ export async function GET(request: NextRequest) {
       },
     );
     if (tokenChanged) {
+      try {
+        await saveStoredGoogleClassroomToken(token as GoogleClassroomToken);
+      } catch {
+        // The refreshed cookie below still keeps this browser connected.
+      }
       response.cookies.set(
         CLASSROOM_TOKEN_COOKIE,
         encryptGoogleClassroomToken(token as GoogleClassroomToken),

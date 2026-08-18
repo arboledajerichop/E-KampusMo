@@ -4,6 +4,8 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto";
+import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
+import { getSupabaseAdminKey } from "@/lib/supabase/admin-key";
 
 export const CLASSROOM_TOKEN_COOKIE = "ekampusmo-google-classroom";
 export const CLASSROOM_STATE_COOKIE = "ekampusmo-google-classroom-state";
@@ -13,6 +15,7 @@ export const CLASSROOM_VERIFIER_COOKIE =
 export const GOOGLE_CLASSROOM_SCOPES = [
   "https://www.googleapis.com/auth/classroom.courses.readonly",
   "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
+  "https://www.googleapis.com/auth/classroom.announcements.readonly",
 ] as const;
 
 export type GoogleClassroomToken = {
@@ -170,6 +173,66 @@ export function decryptGoogleClassroomToken(
   } catch {
     return null;
   }
+}
+
+function storedTokenClient() {
+  const adminKey = getSupabaseAdminKey();
+  if (!adminKey.key) return null;
+
+  return createSupabaseAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    adminKey.key,
+    {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    },
+  );
+}
+
+export async function loadStoredGoogleClassroomToken(userId: string) {
+  const client = storedTokenClient();
+  if (!client) return null;
+
+  const { data, error } = await client
+    .from("google_classroom_connections")
+    .select("token_ciphertext")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  const token = decryptGoogleClassroomToken(data?.token_ciphertext);
+  return token?.userId === userId ? token : null;
+}
+
+export async function saveStoredGoogleClassroomToken(
+  token: GoogleClassroomToken,
+) {
+  const client = storedTokenClient();
+  if (!client) return false;
+
+  const { error } = await client
+    .from("google_classroom_connections")
+    .upsert({
+      user_id: token.userId,
+      token_ciphertext: encryptGoogleClassroomToken(token),
+      updated_at: new Date().toISOString(),
+    });
+  if (error) throw error;
+  return true;
+}
+
+export async function deleteStoredGoogleClassroomToken(userId: string) {
+  const client = storedTokenClient();
+  if (!client) return false;
+
+  const { error } = await client
+    .from("google_classroom_connections")
+    .delete()
+    .eq("user_id", userId);
+  if (error) throw error;
+  return true;
 }
 
 async function requestGoogleToken(

@@ -1,19 +1,24 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthShell from "@/components/auth/AuthShell";
 import GoogleIcon from "@/components/GoogleIcon";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const callbackError =
+    searchParams.get("error") === "google-sign-in-failed"
+      ? "Google sign-in could not be completed. Check the Supabase redirect URL configuration and try again."
+      : "";
 
   async function handleGoogleLogin() {
     setError("");
@@ -137,12 +142,12 @@ export default function LoginPage() {
         </div>
 
         <div aria-live="polite">
-          {error && (
+          {(error || callbackError) && (
             <p
               role="alert"
               className="rounded-[10px] border border-red-200 bg-[var(--danger-soft)] px-4 py-3 text-sm leading-5 text-[var(--danger)] dark:border-red-900"
             >
-              {error}
+              {error || callbackError}
             </p>
           )}
         </div>
@@ -166,5 +171,13 @@ export default function LoginPage() {
         </Link>
       </p>
     </AuthShell>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginContent />
+    </Suspense>
   );
 }

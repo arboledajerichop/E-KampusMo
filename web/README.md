@@ -61,6 +61,10 @@ in filename order. The current migrations are:
 
 `../supabase/migrations/202607300002_api_rate_limits.sql`
 
+`../supabase/migrations/202607300003_classroom_announcements.sql`
+
+`../supabase/migrations/202607300004_google_classroom_connections.sql`
+
 The first migration creates the record tables, explicit authenticated-role
 grants, Row Level Security policies, the profile trigger, and private
 `student-files` and `internship-photos` buckets. The second adds the Internship
@@ -72,7 +76,9 @@ reflection. The fifth adds the optional section identifier used by the Class
 Schedule screen and its downloadable template. The sixth stores each student's
 current-semester start date and manual Classroom completion choices under Row
 Level Security. The seventh adds an authenticated, atomic API rate limiter for
-account-deletion and Google Classroom endpoints.
+account-deletion and Google Classroom endpoints. The eighth stores announcement
+read states, and the ninth stores the encrypted Google Classroom connection per
+E-KampusMo account.
 
 Preferred migration workflow:
 
@@ -195,6 +201,7 @@ In Google Cloud:
    information, then add these Data Access scopes:
    - `https://www.googleapis.com/auth/classroom.courses.readonly`
    - `https://www.googleapis.com/auth/classroom.coursework.me.readonly`
+   - `https://www.googleapis.com/auth/classroom.announcements.readonly`
 3. Create an OAuth client with application type **Web application**.
 4. Add this local authorized redirect URI:
    - `http://localhost:3000/api/google-classroom/callback`
@@ -215,16 +222,19 @@ test user. A Google Workspace organization can instead use an Internal app when
 only users in that organization should connect. Classroom scopes may require
 Google verification before a public production release.
 
-Google access and refresh tokens are encrypted in an HttpOnly cookie and bound
-to the signed-in E-KampusMo user. They are not exposed to browser JavaScript or
-saved in Supabase. Coursework is fetched only when the student connects or
-selects **Refresh Classroom**. A successful response is cached privately for
-that signed-in student for two minutes, and the browser may reuse it for 30
-seconds. Manual refresh bypasses both caches. These responses are never
-eligible for a shared CDN cache. The semester start date and manual completion
-overrides synchronize through `classroom_assignment_preferences`; Google
-Classroom itself is never modified. Disconnecting Classroom removes the token
-while retaining those private preferences.
+Google access and refresh tokens are encrypted before being saved in the
+server-only `google_classroom_connections` table, so one connection follows
+the student's E-KampusMo account across phones and laptops. An encrypted
+HttpOnly cookie remains as a migration fallback and is never exposed to
+browser JavaScript. Coursework and published announcements are fetched only
+when the student connects or selects **Refresh Classroom**. A successful
+response is cached privately for that signed-in student for two minutes, and
+the browser may reuse it for 30 seconds. Manual refresh bypasses both caches.
+These responses are never eligible for a shared CDN cache. The semester start
+date, manual completion overrides, and announcement read states synchronize
+through `classroom_assignment_preferences`; Google Classroom itself is never
+modified. Disconnecting Classroom removes the account connection while
+retaining those private preferences.
 
 ## Rate limiting
 

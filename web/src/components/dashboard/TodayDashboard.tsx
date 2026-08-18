@@ -127,13 +127,17 @@ function ChalkWritingText({ text }: { text: string }) {
     ).matches;
 
     if (reducedMotion) {
-      setVisibleText(text);
-      setFinished(true);
-      return;
+      const timer = window.setTimeout(() => {
+        setVisibleText(text);
+        setFinished(true);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
-    setVisibleText("");
-    setFinished(false);
+    const resetTimer = window.setTimeout(() => {
+      setVisibleText("");
+      setFinished(false);
+    }, 0);
 
     let characterIndex = 0;
     const writingSpeed = text.length > 24 ? 55 : 82;
@@ -148,7 +152,10 @@ function ChalkWritingText({ text }: { text: string }) {
       }
     }, writingSpeed);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(resetTimer);
+      window.clearInterval(timer);
+    };
   }, [text]);
 
   return (
@@ -288,22 +295,29 @@ export default function TodayDashboard({
   const todayNumber = manilaDayNumber(currentTimestamp);
 
   const missingReminders = reminders.filter(
-    (reminder) => reminder.missing,
+    (reminder) => reminder.kind === "assignment" && reminder.missing,
+  );
+
+  const announcementReminders = reminders.filter(
+    (reminder) => reminder.kind === "announcement",
   );
 
   const dueTodayReminders = reminders.filter(
     (reminder) =>
+      reminder.kind === "assignment" &&
       !reminder.missing &&
       manilaDayNumber(reminder.deadline) === todayNumber,
   );
 
   const needsAttentionToday = [
+    ...announcementReminders,
     ...missingReminders,
     ...dueTodayReminders,
   ];
 
   const upcomingReminders = reminders.filter(
     (reminder) =>
+      reminder.kind === "assignment" &&
       !reminder.missing &&
       manilaDayNumber(reminder.deadline) > todayNumber,
   );
@@ -320,7 +334,9 @@ export default function TodayDashboard({
       : upcomingReminders.slice(0, 3);
 
   const nextReminder =
-    upcomingReminders[0] ?? missingReminders[0];
+    upcomingReminders[0] ??
+    missingReminders[0] ??
+    announcementReminders[0];
 
   const todayDay = getManilaDayNumber();
   const currentTime = getManilaTime();
@@ -1002,8 +1018,8 @@ export default function TodayDashboard({
                 </h3>
 
                 <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                  No unfinished assignment
-                  deadlines need your attention.
+                  No unfinished assignment deadlines or unread announcements
+                  need your attention.
                 </p>
               </div>
             </div>

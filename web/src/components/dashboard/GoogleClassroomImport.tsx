@@ -6,6 +6,7 @@ import Icon from "@/components/Icons";
 import { useConfirmation } from "@/components/dashboard/ConfirmationDialog";
 import {
   saveClassroomSemesterStart,
+  setClassroomAnnouncementRead,
   setClassroomItemCompleted,
   useClassroomPreferences,
 } from "@/lib/offline/classroom-preferences-store";
@@ -14,7 +15,8 @@ type ClassroomCategory =
   | "active"
   | "missing"
   | "completed"
-  | "no-deadline";
+  | "no-deadline"
+  | "announcements";
 
 type ClassroomWork = {
   id: string;
@@ -32,8 +34,19 @@ type ClassroomWork = {
   late: boolean;
 };
 
+type ClassroomAnnouncement = {
+  id: string;
+  courseId: string;
+  courseName: string;
+  text: string;
+  alternateLink: string;
+  creationTime: string | null;
+  updateTime: string | null;
+};
+
 type ClassroomResponse = {
   courseWork: ClassroomWork[];
+  announcements?: ClassroomAnnouncement[];
   limited: boolean;
   error?: string;
   code?: string;
@@ -43,7 +56,7 @@ const categoryDetails: Record<
   ClassroomCategory,
   {
     label: string;
-    icon: "tasks" | "clock" | "check" | "calendar";
+    icon: "tasks" | "clock" | "check" | "calendar" | "bell";
     selectedClassName: string;
     iconClassName: string;
   }
@@ -72,6 +85,12 @@ const categoryDetails: Record<
     selectedClassName: "border-amber-600 ring-amber-100 dark:ring-amber-950",
     iconClassName: "bg-[var(--warning-soft)] text-[var(--warning)]",
   },
+  announcements: {
+    label: "Announcements",
+    icon: "bell",
+    selectedClassName: "border-violet-600 ring-violet-100 dark:ring-violet-950",
+    iconClassName: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-200",
+  },
 };
 
 const groupOrder = [
@@ -91,6 +110,10 @@ const manilaDayFormatter = new Intl.DateTimeFormat("en-US", {
   month: "numeric",
   day: "numeric",
 });
+
+function classroomAnnouncementKey(item: ClassroomAnnouncement) {
+  return item.courseId + "/" + item.id;
+}
 
 function classroomItemKey(item: ClassroomWork) {
   return `${item.courseId}/${item.id}`;
@@ -192,6 +215,9 @@ export default function GoogleClassroomImport({
   const [disconnecting, setDisconnecting] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [courseWork, setCourseWork] = useState<ClassroomWork[]>([]);
+  const [announcements, setAnnouncements] = useState<ClassroomAnnouncement[]>(
+    [],
+  );
   const [limited, setLimited] = useState(false);
   const [selectedCategory, setSelectedCategory] =
     useState<ClassroomCategory>("active");
@@ -203,6 +229,10 @@ export default function GoogleClassroomImport({
   const completedItems = useMemo(
     () => new Set(preferences.completedItemKeys),
     [preferences.completedItemKeys],
+  );
+  const readAnnouncementKeys = useMemo(
+    () => new Set(preferences.readAnnouncementKeys),
+    [preferences.readAnnouncementKeys],
   );
   const currentSemesterWork = useMemo(() => {
     if (!preferences.semesterStart) return [];
@@ -230,6 +260,37 @@ export default function GoogleClassroomImport({
         );
       });
   }, [courseWork, preferences.semesterStart]);
+  const currentSemesterAnnouncements = useMemo(() => {
+    if (!preferences.semesterStart) return [];
+    const semesterStart = new Date(
+      preferences.semesterStart + "T00:00:00+08:00",
+    ).getTime();
+
+    return announcements
+      .filter((item) => {
+        const referenceDate = item.creationTime ?? item.updateTime;
+        return (
+          !referenceDate ||
+          new Date(referenceDate).getTime() >= semesterStart
+        );
+      })
+      .filter(
+        (item) => !readAnnouncementKeys.has(classroomAnnouncementKey(item)),
+      )
+      .sort((left, right) => {
+        const leftTime = new Date(
+          left.updateTime ?? left.creationTime ?? 0,
+        ).getTime();
+        const rightTime = new Date(
+          right.updateTime ?? right.creationTime ?? 0,
+        ).getTime();
+        return rightTime - leftTime;
+      });
+  }, [
+    announcements,
+    preferences.semesterStart,
+    readAnnouncementKeys,
+  ]);
   const summary = useMemo(
     () =>
       currentSemesterWork.reduce(
@@ -242,9 +303,10 @@ export default function GoogleClassroomImport({
           missing: 0,
           completed: 0,
           "no-deadline": 0,
+          announcements: currentSemesterAnnouncements.length,
         } satisfies Record<ClassroomCategory, number>,
       ),
-    [completedItems, currentSemesterWork],
+    [completedItems, currentSemesterAnnouncements, currentSemesterWork],
   );
   const filteredWork = useMemo(
     () =>
@@ -255,6 +317,7 @@ export default function GoogleClassroomImport({
     [completedItems, currentSemesterWork, selectedCategory],
   );
   const groupedWork = useMemo(() => {
+    if (selectedCategory === "announcements") return [];
     const groups = new Map<string, ClassroomWork[]>();
     for (const item of filteredWork) {
       const group = activityGroup(item, selectedCategory);
@@ -292,8 +355,12 @@ export default function GoogleClassroomImport({
       setConnected(true);
       setHasLoaded(true);
       setCourseWork(result.courseWork);
+      setAnnouncements(result.announcements ?? []);
       setLimited(result.limited);
-      if (result.courseWork.length === 0) {
+      if (
+        result.courseWork.length === 0 &&
+        (result.announcements ?? []).length === 0
+      ) {
         setMessage(
           "No published coursework was found in your Classroom classes.",
         );
@@ -398,6 +465,15 @@ export default function GoogleClassroomImport({
     setMessage(`${item.title} was marked as completed.`);
   }
 
+  function markAnnouncementRead(item: ClassroomAnnouncement) {
+    setClassroomAnnouncementRead(
+      userId,
+      classroomAnnouncementKey(item),
+      true,
+    );
+    setMessage("Announcement marked as read.");
+  }
+
   function undoManualCompletion(item: ClassroomWork) {
     setClassroomItemCompleted(userId, classroomItemKey(item), false);
     setMessage(`${item.title} now follows its Google Classroom status.`);
@@ -429,6 +505,7 @@ export default function GoogleClassroomImport({
       setConnected(false);
       setHasLoaded(false);
       setCourseWork([]);
+      setAnnouncements([]);
       setMessage("Google Classroom was disconnected.");
     } catch (disconnectError) {
       setError(
@@ -534,6 +611,7 @@ export default function GoogleClassroomImport({
               "missing",
               "completed",
               "no-deadline",
+              "announcements",
             ] as ClassroomCategory[]
           ).map((category) => {
             const details = categoryDetails[category];
@@ -608,6 +686,68 @@ export default function GoogleClassroomImport({
           <p className="text-sm leading-6 text-[var(--muted)]">
             Select “Refresh Classroom” to load your activities.
           </p>
+        ) : selectedCategory === "announcements" ? (
+          currentSemesterAnnouncements.length === 0 ? (
+            <div className="grid min-h-[180px] place-items-center text-center">
+              <div>
+                <p className="text-sm font-bold text-[var(--ink)]">
+                  No unread announcements
+                </p>
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  New teacher announcements will appear here after you refresh
+                  Google Classroom.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--line)]">
+              {currentSemesterAnnouncements.map((item) => (
+                <article
+                  key={classroomAnnouncementKey(item)}
+                  className="grid gap-4 py-5 lg:grid-cols-[1fr_auto] lg:items-start"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <h4 className="font-bold text-[var(--ink)]">
+                        {item.courseName}
+                      </h4>
+                      <span className="text-xs text-[var(--muted)]">
+                        {item.updateTime || item.creationTime
+                          ? " · Posted " +
+                            formatClassroomDeadline(
+                              item.updateTime ?? item.creationTime!,
+                            )
+                          : ""}
+                      </span>
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink-soft)]">
+                      {item.text || "This announcement has no message text."}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => markAnnouncementRead(item)}
+                      className="primary-button px-3 text-xs"
+                    >
+                      <Icon name="check" className="h-4 w-4" />
+                      Mark as read
+                    </button>
+                    {item.alternateLink && (
+                      <a
+                        href={item.alternateLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-[8px] px-3 py-2 text-xs font-bold text-[var(--blue)] hover:bg-blue-50 dark:hover:bg-blue-950"
+                      >
+                        Open in Classroom
+                      </a>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )
         ) : groupedWork.length === 0 ? (
           <div className="grid min-h-[180px] place-items-center text-center">
             <div>

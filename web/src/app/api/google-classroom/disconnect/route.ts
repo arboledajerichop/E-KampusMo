@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   CLASSROOM_TOKEN_COOKIE,
+  deleteStoredGoogleClassroomToken,
   googleClassroomCookieOptions,
 } from "@/lib/google-classroom/server";
 import {
@@ -46,6 +47,17 @@ export async function POST(request: Request) {
   }
 
   clearPrivateCache("google-classroom-coursework", user.id);
+  try {
+    await deleteStoredGoogleClassroomToken(user.id);
+  } catch {
+    return addRateLimitHeaders(
+      NextResponse.json(
+        { error: "Google Classroom could not be disconnected." },
+        { status: 500 },
+      ),
+      rateLimit,
+    );
+  }
   const response = NextResponse.json({ disconnected: true });
   response.headers.set("Cache-Control", "no-store");
   response.cookies.set(

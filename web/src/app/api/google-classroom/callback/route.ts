@@ -8,6 +8,7 @@ import {
   getGoogleClassroomRedirectUri,
   googleClassroomCookieOptions,
   isGoogleClassroomConfigured,
+  saveStoredGoogleClassroomToken,
 } from "@/lib/google-classroom/server";
 import {
   addRateLimitHeaders,
@@ -95,6 +96,12 @@ export async function GET(request: NextRequest) {
       redirectUri: getGoogleClassroomRedirectUri(request),
       userId: user.id,
     });
+    try {
+      await saveStoredGoogleClassroomToken(token);
+    } catch {
+      // Keep the encrypted cookie fallback until the account connection table
+      // is available in Supabase.
+    }
     clearPrivateCache("google-classroom-coursework", user.id);
     const response = redirectWithResult(request, "connected");
     response.cookies.set(

@@ -13,6 +13,7 @@ type ClassroomPreferences = {
   version: 1;
   semesterStart: string;
   completedItemKeys: string[];
+  readAnnouncementKeys: string[];
   updatedAt: string;
 };
 
@@ -20,10 +21,65 @@ const EMPTY_DATA: ClassroomPreferences = {
   version: 1,
   semesterStart: "",
   completedItemKeys: [],
+  readAnnouncementKeys: [],
   updatedAt: "",
 };
 const EMPTY_SERIALIZED = JSON.stringify(EMPTY_DATA);
 const CHANGE_EVENT = "ekampusmo-classroom-preferences-change";
+
+type CloudPreferencesRow = {
+  semester_start: string | null;
+  completed_item_keys: unknown;
+  read_announcement_keys?: unknown;
+  updated_at: string;
+};
+
+function isMissingAnnouncementColumn(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === "string" ? candidate.code : "";
+  const message =
+    typeof candidate.message === "string" ? candidate.message : "";
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    /read_announcement_keys.*column|column.*read_announcement_keys/i.test(
+      message,
+    )
+  );
+}
+
+async function upsertCloudPreferences(
+  userId: string,
+  data: ClassroomPreferences,
+) {
+  const client = createClient();
+  const payload = {
+    user_id: userId,
+    semester_start: data.semesterStart || null,
+    completed_item_keys: data.completedItemKeys,
+    read_announcement_keys: data.readAnnouncementKeys,
+    updated_at: data.updatedAt || new Date().toISOString(),
+  };
+  let { error } = await client
+    .from("classroom_assignment_preferences")
+    .upsert(payload);
+
+  // Keep existing installations working until migration 202607300003 is
+  // applied. Announcement read states remain local until that column exists.
+  if (error && isMissingAnnouncementColumn(error)) {
+    ({ error } = await client
+      .from("classroom_assignment_preferences")
+      .upsert({
+        user_id: payload.user_id,
+        semester_start: payload.semester_start,
+        completed_item_keys: payload.completed_item_keys,
+        updated_at: payload.updated_at,
+      }));
+  }
+
+  if (error) throw error;
+}
 
 function storageKey(userId: string) {
   return `ekampusmo:${userId}:classroom-preferences-v1`;
@@ -41,6 +97,11 @@ function parseData(serialized: string | null): ClassroomPreferences {
           : "",
       completedItemKeys: Array.isArray(parsed.completedItemKeys)
         ? parsed.completedItemKeys.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [],
+      readAnnouncementKeys: Array.isArray(parsed.readAnnouncementKeys)
+        ? parsed.readAnnouncementKeys.filter(
             (value): value is string => typeof value === "string",
           )
         : [],
@@ -68,42 +129,60 @@ function upsertPreferencesInCloud(
   data: ClassroomPreferences,
 ) {
   void runCloudTask(async () => {
-    const { error } = await createClient()
-      .from("classroom_assignment_preferences")
-      .upsert({
-        user_id: userId,
-        semester_start: data.semesterStart || null,
-        completed_item_keys: data.completedItemKeys,
-        updated_at: data.updatedAt,
-      });
-    if (error) throw error;
+    await upsertCloudPreferences(userId, data);
   });
 }
 
 async function syncPreferences(userId: string) {
   await runCloudTask(async () => {
     const local = parseData(readSerialized(userId));
-    const { data: row, error } = await createClient()
+    const client = createClient();
+    let supportsAnnouncementReadState = true;
+    let { data: row, error } = await client
       .from("classroom_assignment_preferences")
-      .select("semester_start, completed_item_keys, updated_at")
+      .select(
+        "semester_start, completed_item_keys, read_announcement_keys, updated_at",
+      )
       .eq("user_id", userId)
       .maybeSingle();
+
+    if (error && isMissingAnnouncementColumn(error)) {
+      supportsAnnouncementReadState = false;
+      const legacyResult = await client
+        .from("classroom_assignment_preferences")
+        .select("semester_start, completed_item_keys, updated_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      row = legacyResult.data as typeof row;
+      error = legacyResult.error;
+    }
+
     if (error) throw error;
 
-    const cloud: ClassroomPreferences | null = row
+    const cloudRow = row as CloudPreferencesRow | null;
+    const cloud: ClassroomPreferences | null = cloudRow
       ? {
           version: 1,
           semesterStart:
-            typeof row.semester_start === "string"
-              ? row.semester_start
+            typeof cloudRow.semester_start === "string"
+              ? cloudRow.semester_start
               : "",
-          completedItemKeys: Array.isArray(row.completed_item_keys)
-            ? row.completed_item_keys.filter(
+          completedItemKeys: Array.isArray(cloudRow.completed_item_keys)
+            ? cloudRow.completed_item_keys.filter(
                 (value): value is string => typeof value === "string",
               )
             : [],
+          readAnnouncementKeys: Array.isArray(cloudRow.read_announcement_keys)
+            ? cloudRow.read_announcement_keys.filter(
+                (value): value is string => typeof value === "string",
+              )
+            : supportsAnnouncementReadState
+              ? []
+              : local.readAnnouncementKeys,
           updatedAt:
-            typeof row.updated_at === "string" ? row.updated_at : "",
+            typeof cloudRow.updated_at === "string"
+              ? cloudRow.updated_at
+              : "",
         }
       : null;
     const selected =
@@ -111,15 +190,7 @@ async function syncPreferences(userId: string) {
 
     writeData(userId, selected);
     if (!cloud || selected === local) {
-      const { error: upsertError } = await createClient()
-        .from("classroom_assignment_preferences")
-        .upsert({
-          user_id: userId,
-          semester_start: selected.semesterStart || null,
-          completed_item_keys: selected.completedItemKeys,
-          updated_at: selected.updatedAt || new Date().toISOString(),
-        });
-      if (upsertError) throw upsertError;
+      await upsertCloudPreferences(userId, selected);
     }
   });
 }
@@ -150,6 +221,24 @@ export function setClassroomItemCompleted(
   const next: ClassroomPreferences = {
     ...current,
     completedItemKeys: [...keys],
+    updatedAt: new Date().toISOString(),
+  };
+  writeData(userId, next);
+  upsertPreferencesInCloud(userId, next);
+}
+
+export function setClassroomAnnouncementRead(
+  userId: string,
+  announcementKey: string,
+  read: boolean,
+) {
+  const current = parseData(readSerialized(userId));
+  const keys = new Set(current.readAnnouncementKeys);
+  if (read) keys.add(announcementKey);
+  else keys.delete(announcementKey);
+  const next: ClassroomPreferences = {
+    ...current,
+    readAnnouncementKeys: [...keys],
     updatedAt: new Date().toISOString(),
   };
   writeData(userId, next);

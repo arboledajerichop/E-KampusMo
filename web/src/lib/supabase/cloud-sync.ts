@@ -47,6 +47,24 @@ function emit(next: Omit<CloudSyncSnapshot, "changedAt">) {
   listeners.forEach((listener) => listener());
 }
 
+function describeError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      message?: unknown;
+      code?: unknown;
+      details?: unknown;
+    };
+    const message =
+      typeof candidate.message === "string" ? candidate.message : "";
+    const code = typeof candidate.code === "string" ? candidate.code : "";
+    const details =
+      typeof candidate.details === "string" ? candidate.details : "";
+    return [message, code && `(${code})`, details].filter(Boolean).join(" ");
+  }
+  return "Unable to reach Supabase";
+}
+
 function deleteQueueKey(userId: string) {
   return `ekampusmo:${userId}:pending-cloud-deletes-v1`;
 }
@@ -132,11 +150,15 @@ export async function runCloudTask<T>(
     } catch (error) {
     activeTasks = Math.max(0, activeTasks - 1);
 
-    console.error("[E-KampusMo cloud sync failed]", error);
+    const detail = describeError(error);
+    // Sync failures are recoverable because the local cache remains the source
+    // of truth until the next successful retry. Warn without triggering the
+    // Next.js development error overlay.
+    console.warn("[E-KampusMo cloud sync failed]", detail);
 
     emit({
       state: "error",
-      message: "Cloud sync needs attention",
+      message: `Cloud sync needs attention · ${detail}`,
     });
 
     return { ok: false, error };

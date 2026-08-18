@@ -14,6 +14,7 @@ import {
 } from "@/lib/reminders/assignment-reminders";
 
 const groupOrder = [
+  "Announcements",
   "Missing",
   "Due today",
   "Due tomorrow",

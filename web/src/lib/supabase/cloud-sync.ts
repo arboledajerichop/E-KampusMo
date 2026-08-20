@@ -166,6 +166,36 @@ export async function runCloudTask<T>(
   }
 }
 
+export function acknowledgeCloudDelete(
+  userId: string,
+  table: CloudTable,
+  id: string,
+) {
+  const queue = readDeleteQueue(userId);
+  writeDeleteQueue(
+    userId,
+    queue.filter((item) => item.table !== table || item.id !== id),
+  );
+}
+
+export async function deleteCloudRecord(table: CloudTable, id: string) {
+  const response = await fetch("/api/cloud-records/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ table, id }),
+  });
+  if (response.ok) return;
+
+  const result = (await response.json().catch(() => ({}))) as {
+    error?: unknown;
+  };
+  throw new Error(
+    typeof result.error === "string"
+      ? result.error
+      : "The record could not be deleted from Supabase.",
+  );
+}
+
 /** Keeps each account's cloud changes ordered, including deletes. */
 export function runCloudTaskForUser<T>(
   userId: string,

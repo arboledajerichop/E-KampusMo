@@ -8,6 +8,8 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
+  acknowledgeCloudDelete,
+  deleteCloudRecord,
   flushCloudDeletes,
   queueCloudDelete,
   runCloudTaskForUser,
@@ -560,9 +562,10 @@ export function removeSchedule(userId: string, scheduleId: string) {
     ),
   });
   queueCloudDelete(userId, "class_schedules", scheduleId);
-  void runCloudTaskForUser(userId, () =>
-    flushCloudDeletes(createClient(), userId, ["class_schedules"]),
-  );
+  void runCloudTaskForUser(userId, async () => {
+    await deleteCloudRecord("class_schedules", scheduleId);
+    acknowledgeCloudDelete(userId, "class_schedules", scheduleId);
+  });
 }
 
 export function findScheduleConflict(

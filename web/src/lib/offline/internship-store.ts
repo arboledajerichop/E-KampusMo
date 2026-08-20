@@ -8,6 +8,8 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
+  acknowledgeCloudDelete,
+  deleteCloudRecord,
   flushCloudDeletes,
   queueCloudDelete,
   runCloudTaskForUser,
@@ -434,17 +436,19 @@ export function removeInternshipEntry(userId: string, entryId: string) {
     entries: data.entries.filter((entry) => entry.id !== entryId),
   });
   queueCloudDelete(userId, "internship_entries", entryId);
-  void runCloudTaskForUser(userId, () =>
-    flushCloudDeletes(createClient(), userId, ["internship_entries"]),
-  );
+  void runCloudTaskForUser(userId, async () => {
+    await deleteCloudRecord("internship_entries", entryId);
+    acknowledgeCloudDelete(userId, "internship_entries", entryId);
+  });
 }
 
 export function removeInternshipProfile(userId: string, profileId: string) {
   writeData(userId, { version: 1, profile: null, entries: [] });
   queueCloudDelete(userId, "internships", profileId);
-  void runCloudTaskForUser(userId, () =>
-    flushCloudDeletes(createClient(), userId, ["internships"]),
-  );
+  void runCloudTaskForUser(userId, async () => {
+    await deleteCloudRecord("internships", profileId);
+    acknowledgeCloudDelete(userId, "internships", profileId);
+  });
 }
 
 function timeToMinutes(value: string) {

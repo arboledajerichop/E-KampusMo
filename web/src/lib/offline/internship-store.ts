@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   flushCloudDeletes,
   queueCloudDelete,
-  runCloudTask,
+  runCloudTaskForUser,
 } from "@/lib/supabase/cloud-sync";
 import {
   addCalendarDays,
@@ -206,19 +206,22 @@ function entryFromRow(row: Record<string, unknown>): InternshipEntry {
 }
 
 async function syncInternshipData(userId: string) {
-  await runCloudTask(async () => {
+  await runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     await flushCloudDeletes(supabase, userId, [
       "internship_entries",
       "internships",
     ]);
-    const local = parseData(readSerialized(userId));
+    const localSerialized = readSerialized(userId);
+    const local = parseData(localSerialized);
     const existingProfile = await supabase
       .from("internships")
       .select("*")
       .eq("user_id", userId)
       .maybeSingle();
     if (existingProfile.error) throw existingProfile.error;
+
+    if (readSerialized(userId) !== localSerialized) return;
 
     if (local.profile) {
       const shouldUploadProfile =
@@ -296,6 +299,8 @@ async function syncInternshipData(userId: string) {
       .eq("internship_id", profileResult.data.id)
       .order("date", { ascending: false });
     if (entriesResult.error) throw entriesResult.error;
+    if (readSerialized(userId) !== localSerialized) return;
+
     writeData(userId, {
       version: 1,
       profile: profileFromRow(profileResult.data),
@@ -305,7 +310,7 @@ async function syncInternshipData(userId: string) {
 }
 
 function upsertProfileInCloud(userId: string, profile: InternshipProfile) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const { error } = await createClient()
       .from("internships")
       .upsert(profileRow(userId, profile));
@@ -318,7 +323,7 @@ function upsertEntryInCloud(
   profile: InternshipProfile,
   entry: InternshipEntry,
 ) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     const { error: profileError } = await supabase
       .from("internships")
@@ -338,7 +343,7 @@ function updateEntryInCloud(
   profile: InternshipProfile,
   entry: InternshipEntry,
 ) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     const { error: profileError } = await supabase
       .from("internships")
@@ -429,7 +434,7 @@ export function removeInternshipEntry(userId: string, entryId: string) {
     entries: data.entries.filter((entry) => entry.id !== entryId),
   });
   queueCloudDelete(userId, "internship_entries", entryId);
-  void runCloudTask(() =>
+  void runCloudTaskForUser(userId, () =>
     flushCloudDeletes(createClient(), userId, ["internship_entries"]),
   );
 }
@@ -437,7 +442,7 @@ export function removeInternshipEntry(userId: string, entryId: string) {
 export function removeInternshipProfile(userId: string, profileId: string) {
   writeData(userId, { version: 1, profile: null, entries: [] });
   queueCloudDelete(userId, "internships", profileId);
-  void runCloudTask(() =>
+  void runCloudTaskForUser(userId, () =>
     flushCloudDeletes(createClient(), userId, ["internships"]),
   );
 }

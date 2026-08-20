@@ -455,11 +455,31 @@ export default function InternshipClient({ userId }: { userId: string }) {
                 Add work log
               </button>
             </div>
-          ) : undefined
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowProfileForm(true)}
+              className="primary-button w-full px-5 sm:w-auto"
+            >
+              <Icon name="plus" className="h-4 w-4" />
+              Add placement
+            </button>
+          )
         }
       />
 
-      {(!profile || showProfileForm) && (
+      {!profile && !showProfileForm && (
+        <section className="mt-6 rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-5 text-center shadow-[var(--shadow-soft)] sm:p-7">
+          <h2 className="text-xl font-bold text-[var(--ink)]">
+            No internship placement yet
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+            Add your placement whenever you are ready. Your internship details are optional until then.
+          </p>
+        </section>
+      )}
+
+      {showProfileForm && (
         <section className="mt-6 rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-5 shadow-[var(--shadow-soft)] sm:p-7">
           <p className="text-xs font-bold uppercase tracking-[0.13em] text-[var(--blue)]">
             Internship setup
@@ -569,15 +589,13 @@ export default function InternshipClient({ userId }: { userId: string }) {
               </p>
             )}
             <div className="mt-6 flex flex-wrap justify-end gap-3">
-              {profile && (
-                <button
-                  type="button"
-                  onClick={() => setShowProfileForm(false)}
-                  className="secondary-button px-5"
-                >
-                  Cancel
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowProfileForm(false)}
+                className="secondary-button px-5"
+              >
+                Cancel
+              </button>
               <button type="submit" className="primary-button px-5">
                 Save placement
               </button>

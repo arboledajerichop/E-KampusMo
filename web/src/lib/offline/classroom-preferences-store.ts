@@ -7,7 +7,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { runCloudTask } from "@/lib/supabase/cloud-sync";
+import { runCloudTaskForUser } from "@/lib/supabase/cloud-sync";
 
 type ClassroomPreferences = {
   version: 1;
@@ -128,14 +128,15 @@ function upsertPreferencesInCloud(
   userId: string,
   data: ClassroomPreferences,
 ) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     await upsertCloudPreferences(userId, data);
   });
 }
 
 async function syncPreferences(userId: string) {
-  await runCloudTask(async () => {
-    const local = parseData(readSerialized(userId));
+  await runCloudTaskForUser(userId, async () => {
+    const localSerialized = readSerialized(userId);
+    const local = parseData(localSerialized);
     const client = createClient();
     let supportsAnnouncementReadState = true;
     let { data: row, error } = await client
@@ -185,6 +186,8 @@ async function syncPreferences(userId: string) {
               : "",
         }
       : null;
+    if (readSerialized(userId) !== localSerialized) return;
+
     const selected =
       cloud && cloud.updatedAt >= local.updatedAt ? cloud : local;
 

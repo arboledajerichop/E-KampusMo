@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   flushCloudDeletes,
   queueCloudDelete,
-  runCloudTask,
+  runCloudTaskForUser,
 } from "@/lib/supabase/cloud-sync";
 import { readAcademicData } from "@/lib/offline/academic-store";
 
@@ -159,7 +159,7 @@ async function ensureSubjectsInCloud(userId: string) {
 }
 
 function upsertAssignmentInCloud(userId: string, assignment: Assignment) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     await ensureSubjectsInCloud(userId);
     const { error } = await createClient()
       .from("assignments")
@@ -169,10 +169,11 @@ function upsertAssignmentInCloud(userId: string, assignment: Assignment) {
 }
 
 async function syncStudentWorkData(userId: string) {
-  await runCloudTask(async () => {
+  await runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     await flushCloudDeletes(supabase, userId, ["assignments"]);
-    const local = parseData(readSerialized(userId));
+    const localSerialized = readSerialized(userId);
+    const local = parseData(localSerialized);
     await ensureSubjectsInCloud(userId);
     const existingAssignments = await supabase
       .from("assignments")
@@ -189,6 +190,8 @@ async function syncStudentWorkData(userId: string) {
       const cloudUpdatedAt = cloudAssignmentTimes.get(assignment.id);
       return !cloudUpdatedAt || assignment.updatedAt > cloudUpdatedAt;
     });
+
+    if (readSerialized(userId) !== localSerialized) return;
 
     if (assignmentsToUpload.length > 0) {
       const { error } = await supabase
@@ -207,6 +210,8 @@ async function syncStudentWorkData(userId: string) {
       .eq("user_id", userId)
       .order("deadline");
     if (assignmentsResult.error) throw assignmentsResult.error;
+
+    if (readSerialized(userId) !== localSerialized) return;
 
     writeData(userId, {
       ...local,
@@ -265,7 +270,7 @@ export function removeAssignment(userId: string, assignmentId: string) {
     ),
   });
   queueCloudDelete(userId, "assignments", assignmentId);
-  void runCloudTask(() =>
+  void runCloudTaskForUser(userId, () =>
     flushCloudDeletes(createClient(), userId, ["assignments"]),
   );
 }

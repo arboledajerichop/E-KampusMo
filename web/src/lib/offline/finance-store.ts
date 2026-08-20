@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   flushCloudDeletes,
   queueCloudDelete,
-  runCloudTask,
+  runCloudTaskForUser,
 } from "@/lib/supabase/cloud-sync";
 
 export const expenseCategories = [
@@ -186,13 +186,14 @@ function expenseFromRow(row: Record<string, unknown>): Expense {
 }
 
 async function syncFinanceData(userId: string) {
-  await runCloudTask(async () => {
+  await runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     await flushCloudDeletes(supabase, userId, [
       "expenses",
       "allowance_periods",
     ]);
-    const local = readFinanceData(userId);
+    const localSerialized = readSerialized(userId);
+    const local = parseFinanceData(localSerialized);
     const [existingPeriods, existingExpenses] = await Promise.all([
       supabase.from("allowance_periods").select("*").eq("user_id", userId),
       supabase.from("expenses").select("*").eq("user_id", userId),
@@ -219,6 +220,8 @@ async function syncFinanceData(userId: string) {
       const cloudUpdatedAt = cloudExpenseTimes.get(expense.id);
       return !cloudUpdatedAt || expense.updatedAt > cloudUpdatedAt;
     });
+
+    if (readSerialized(userId) !== localSerialized) return;
 
     if (periodsToUpload.length > 0) {
       const { error } = await supabase
@@ -249,6 +252,8 @@ async function syncFinanceData(userId: string) {
     ]);
     if (periodsResult.error) throw periodsResult.error;
     if (expensesResult.error) throw expensesResult.error;
+    if (readSerialized(userId) !== localSerialized) return;
+
     writeData(userId, {
       version: 1,
       allowancePeriods: (periodsResult.data ?? []).map(allowanceFromRow),
@@ -258,7 +263,7 @@ async function syncFinanceData(userId: string) {
 }
 
 function upsertAllowanceInCloud(userId: string, period: AllowancePeriod) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const { error } = await createClient()
       .from("allowance_periods")
       .upsert(allowanceRow(userId, period));
@@ -267,7 +272,7 @@ function upsertAllowanceInCloud(userId: string, period: AllowancePeriod) {
 }
 
 function upsertExpenseInCloud(userId: string, expense: Expense) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const { error } = await createClient()
       .from("expenses")
       .upsert(expenseRow(userId, expense));
@@ -351,7 +356,7 @@ export function removeAllowancePeriod(userId: string, periodId: string) {
     ),
   });
   queueCloudDelete(userId, "allowance_periods", periodId);
-  void runCloudTask(() =>
+  void runCloudTaskForUser(userId, () =>
     flushCloudDeletes(createClient(), userId, ["allowance_periods"]),
   );
 }
@@ -382,7 +387,7 @@ export function removeExpense(userId: string, expenseId: string) {
     expenses: data.expenses.filter((expense) => expense.id !== expenseId),
   });
   queueCloudDelete(userId, "expenses", expenseId);
-  void runCloudTask(() =>
+  void runCloudTaskForUser(userId, () =>
     flushCloudDeletes(createClient(), userId, ["expenses"]),
   );
 }

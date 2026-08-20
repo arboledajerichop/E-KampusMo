@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   flushCloudDeletes,
   queueCloudDelete,
-  runCloudTask,
+  runCloudTaskForUser,
 } from "@/lib/supabase/cloud-sync";
 import {
   getUniqueScheduleMeetings,
@@ -261,13 +261,14 @@ function scheduleFromRow(row: Record<string, unknown>): ClassSchedule {
 }
 
 async function syncAcademicData(userId: string) {
-  await runCloudTask(async () => {
+  await runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     await flushCloudDeletes(supabase, userId, [
       "class_schedules",
       "subjects",
     ]);
-    const local = readAcademicData(userId);
+    const localSerialized = readSerialized(userId);
+    const local = parseAcademicData(localSerialized);
     const [existingSubjects, existingSchedules] = await Promise.all([
       supabase.from("subjects").select("*").eq("user_id", userId),
       supabase.from("class_schedules").select("*").eq("user_id", userId),
@@ -294,6 +295,8 @@ async function syncAcademicData(userId: string) {
       const cloudUpdatedAt = cloudScheduleTimes.get(schedule.id);
       return !cloudUpdatedAt || schedule.updatedAt > cloudUpdatedAt;
     });
+
+    if (readSerialized(userId) !== localSerialized) return;
 
     if (subjectsToUpload.length > 0) {
       const { error } = await supabase
@@ -343,6 +346,8 @@ async function syncAcademicData(userId: string) {
       if (error) throw error;
     }
 
+    if (readSerialized(userId) !== localSerialized) return;
+
     writeData(userId, {
       version: 1,
       subjects: (subjectsResult.data ?? []).map(subjectFromRow),
@@ -352,7 +357,7 @@ async function syncAcademicData(userId: string) {
 }
 
 function upsertSubjectInCloud(userId: string, subject: Subject) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const { error } = await createClient()
       .from("subjects")
       .upsert(subjectRow(userId, subject));
@@ -361,7 +366,7 @@ function upsertSubjectInCloud(userId: string, subject: Subject) {
 }
 
 function upsertScheduleInCloud(userId: string, schedule: ClassSchedule) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     const localSubject = readAcademicData(userId).subjects.find(
       (subject) => subject.id === schedule.subjectId,
@@ -383,7 +388,7 @@ function upsertSchedulesInCloud(
   userId: string,
   schedules: ClassSchedule[],
 ) {
-  void runCloudTask(async () => {
+  void runCloudTaskForUser(userId, async () => {
     const supabase = createClient();
     const subjectIds = new Set(schedules.map((schedule) => schedule.subjectId));
     const localSubjects = readAcademicData(userId).subjects.filter((subject) =>
@@ -460,7 +465,7 @@ export function removeSubject(userId: string, subjectId: string) {
     ),
   });
   queueCloudDelete(userId, "subjects", subjectId);
-  void runCloudTask(() =>
+  void runCloudTaskForUser(userId, () =>
     flushCloudDeletes(createClient(), userId, ["subjects"]),
   );
 }
@@ -555,7 +560,7 @@ export function removeSchedule(userId: string, scheduleId: string) {
     ),
   });
   queueCloudDelete(userId, "class_schedules", scheduleId);
-  void runCloudTask(() =>
+  void runCloudTaskForUser(userId, () =>
     flushCloudDeletes(createClient(), userId, ["class_schedules"]),
   );
 }

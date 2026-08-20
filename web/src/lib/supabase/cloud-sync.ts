@@ -35,6 +35,7 @@ export type CloudTable =
   | "expenses";
 
 const listeners = new Set<() => void>();
+const userTaskChains = new Map<string, Promise<unknown>>();
 let activeTasks = 0;
 let snapshot: CloudSyncSnapshot = {
   state: "checking",
@@ -163,6 +164,23 @@ export async function runCloudTask<T>(
 
     return { ok: false, error };
   }
+}
+
+/** Keeps each account's cloud changes ordered, including deletes. */
+export function runCloudTaskForUser<T>(
+  userId: string,
+  task: () => Promise<T>,
+) {
+  const previous = userTaskChains.get(userId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => runCloudTask(task));
+
+  userTaskChains.set(userId, next);
+  void next.finally(() => {
+    if (userTaskChains.get(userId) === next) userTaskChains.delete(userId);
+  });
+  return next;
 }
 
 export function markCloudPending() {

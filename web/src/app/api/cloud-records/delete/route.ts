@@ -45,11 +45,26 @@ export async function POST(request: Request) {
   }
 
   const { error } = await supabase
+    .from("student_record_deletions")
+    .upsert({
+      user_id: user.id,
+      table_name: table,
+      record_id: body.id,
+      deleted_at: new Date().toISOString(),
+    });
+  if (error) {
+    return NextResponse.json(
+      { error: "The deletion could not be synchronized." },
+      { status: 500 },
+    );
+  }
+
+  const { error: deleteError } = await supabase
     .from(table)
     .delete()
     .eq("id", body.id)
     .eq("user_id", user.id);
-  if (error) {
+  if (deleteError) {
     return NextResponse.json(
       { error: "The record could not be deleted from Supabase." },
       { status: 500 },

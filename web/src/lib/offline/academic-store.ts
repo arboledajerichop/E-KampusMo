@@ -11,6 +11,8 @@ import {
   acknowledgeCloudDelete,
   deleteCloudRecord,
   flushCloudDeletes,
+  isCloudDeletion,
+  loadCloudDeletions,
   queueCloudDelete,
   runCloudTaskForUser,
 } from "@/lib/supabase/cloud-sync";
@@ -269,8 +271,20 @@ async function syncAcademicData(userId: string) {
       "class_schedules",
       "subjects",
     ]);
-    const localSerialized = readSerialized(userId);
-    const local = parseAcademicData(localSerialized);
+    const deletions = await loadCloudDeletions(supabase, userId, [
+      "class_schedules",
+    ]);
+    let localSerialized = readSerialized(userId);
+    let local = parseAcademicData(localSerialized);
+    const schedules = local.schedules.filter(
+      (schedule) =>
+        !isCloudDeletion(deletions, "class_schedules", schedule.id),
+    );
+    if (schedules.length !== local.schedules.length) {
+      local = { ...local, schedules };
+      writeData(userId, local);
+      localSerialized = readSerialized(userId);
+    }
     const [existingSubjects, existingSchedules] = await Promise.all([
       supabase.from("subjects").select("*").eq("user_id", userId),
       supabase.from("class_schedules").select("*").eq("user_id", userId),

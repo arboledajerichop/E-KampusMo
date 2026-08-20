@@ -34,6 +34,11 @@ export type CloudTable =
   | "allowance_periods"
   | "expenses";
 
+export type CloudDeletion = {
+  table: CloudTable;
+  id: string;
+};
+
 const listeners = new Set<() => void>();
 const userTaskChains = new Map<string, Promise<unknown>>();
 let activeTasks = 0;
@@ -194,6 +199,33 @@ export async function deleteCloudRecord(table: CloudTable, id: string) {
       ? result.error
       : "The record could not be deleted from Supabase.",
   );
+}
+
+export async function loadCloudDeletions(
+  supabase: SupabaseClient,
+  userId: string,
+  tables: CloudTable[],
+) {
+  const { data, error } = await supabase
+    .from("student_record_deletions")
+    .select("table_name, record_id")
+    .eq("user_id", userId)
+    .in("table_name", tables);
+  if (error) throw error;
+
+  return new Set(
+    (data ?? []).map(
+      (row) => `${String(row.table_name)}:${String(row.record_id)}`,
+    ),
+  );
+}
+
+export function isCloudDeletion(
+  deletions: Set<string>,
+  table: CloudTable,
+  id: string,
+) {
+  return deletions.has(`${table}:${id}`);
 }
 
 /** Keeps each account's cloud changes ordered, including deletes. */

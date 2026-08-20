@@ -11,6 +11,8 @@ import {
   acknowledgeCloudDelete,
   deleteCloudRecord,
   flushCloudDeletes,
+  isCloudDeletion,
+  loadCloudDeletions,
   queueCloudDelete,
   runCloudTaskForUser,
 } from "@/lib/supabase/cloud-sync";
@@ -214,8 +216,30 @@ async function syncInternshipData(userId: string) {
       "internship_entries",
       "internships",
     ]);
-    const localSerialized = readSerialized(userId);
-    const local = parseData(localSerialized);
+    const deletions = await loadCloudDeletions(supabase, userId, [
+      "internship_entries",
+      "internships",
+    ]);
+    let localSerialized = readSerialized(userId);
+    let local = parseData(localSerialized);
+    if (
+      local.profile &&
+      isCloudDeletion(deletions, "internships", local.profile.id)
+    ) {
+      local = { version: 1, profile: null, entries: [] };
+      writeData(userId, local);
+      localSerialized = readSerialized(userId);
+    } else {
+      const entries = local.entries.filter(
+        (entry) =>
+          !isCloudDeletion(deletions, "internship_entries", entry.id),
+      );
+      if (entries.length !== local.entries.length) {
+        local = { ...local, entries };
+        writeData(userId, local);
+        localSerialized = readSerialized(userId);
+      }
+    }
     const existingProfile = await supabase
       .from("internships")
       .select("*")

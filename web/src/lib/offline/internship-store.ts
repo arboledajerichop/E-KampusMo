@@ -79,6 +79,8 @@ const EMPTY_DATA: InternshipData = {
 };
 const EMPTY_SERIALIZED = JSON.stringify(EMPTY_DATA);
 const CHANGE_EVENT = "ekampusmo-internship-change";
+const LUNCH_BREAK_START_MINUTES = 12 * 60;
+const LUNCH_BREAK_END_MINUTES = 13 * 60;
 
 function storageKey(userId: string) {
   return `ekampusmo:${userId}:offline-internship-v1`;
@@ -490,6 +492,14 @@ function timeToMinutes(value: string) {
   return hours * 60 + minutes;
 }
 
+function lunchBreakMinutesWithinShift(start: number, end: number) {
+  return Math.max(
+    0,
+    Math.min(end, LUNCH_BREAK_END_MINUTES) -
+      Math.max(start, LUNCH_BREAK_START_MINUTES),
+  );
+}
+
 export function calculateRenderedMinutes({
   status,
   clockIn,
@@ -508,7 +518,14 @@ export function calculateRenderedMinutes({
   const start = timeToMinutes(clockIn);
   const end = timeToMinutes(clockOut);
   if (start === null || end === null || end <= start) return null;
-  return Math.max(0, end - start - breakMinutes + adjustmentMinutes);
+  return Math.max(
+    0,
+    end -
+      start -
+      lunchBreakMinutesWithinShift(start, end) -
+      breakMinutes +
+      adjustmentMinutes,
+  );
 }
 
 export function calculateCreditedMinutes(

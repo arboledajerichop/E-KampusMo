@@ -951,7 +951,7 @@ export default function InternshipClient({ userId }: { userId: string }) {
                       )}
                     <p className="mt-4 text-xs leading-5 text-[var(--muted)]">
                       {entryStatus === "worked"
-                        ? `Clock-out minus clock-in, capped at ${formatDuration(
+                        ? `The 12 noon–1 PM lunch break is automatically excluded, then time is capped at ${formatDuration(
                             profile.maxDailyMinutes,
                           )} per day. Up to half is labeled Half day; more than half but below the maximum is Early out.`
                         : "A weekday absence adds no rendered time and moves the expected end date."}

@@ -30,6 +30,15 @@ import {
 } from "@/lib/calendar/philippines-calendar";
 
 const DEFAULT_BREAK_MINUTES = 0;
+const TIME_HOURS = Array.from({ length: 12 }, (_, index) => index + 1);
+const TIME_MINUTES = Array.from({ length: 60 }, (_, index) => index);
+
+type TimePeriod = "AM" | "PM";
+type StandardTimeParts = {
+  hour: number;
+  minute: number;
+  period: TimePeriod;
+};
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-PH", {
@@ -37,6 +46,90 @@ function formatDate(value: string) {
     day: "numeric",
     year: "numeric",
   }).format(new Date(`${value}T00:00:00`));
+}
+
+function standardTimeParts(value: string): StandardTimeParts {
+  const [hourText, minuteText] = value.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return { hour: 8, minute: 0, period: "AM" };
+  }
+  return {
+    hour: hour % 12 || 12,
+    minute,
+    period: hour < 12 ? "AM" : "PM",
+  };
+}
+
+function timeValue({ hour, minute, period }: StandardTimeParts) {
+  const twentyFourHour = (hour % 12) + (period === "PM" ? 12 : 0);
+  return `${String(twentyFourHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function formatStandardTime(value: string) {
+  const { hour, minute, period } = standardTimeParts(value);
+  return `${hour}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+function StandardTimeInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const parts = standardTimeParts(value);
+  const update = (nextParts: Partial<StandardTimeParts>) => {
+    onChange(timeValue({ ...parts, ...nextParts }));
+  };
+
+  return (
+    <span className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+      <select
+        aria-label={`${label} hour`}
+        value={parts.hour}
+        onChange={(event) => update({ hour: Number(event.target.value) })}
+        className="form-input"
+      >
+        {TIME_HOURS.map((hour) => (
+          <option key={hour} value={hour}>
+            {hour}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label={`${label} minute`}
+        value={parts.minute}
+        onChange={(event) => update({ minute: Number(event.target.value) })}
+        className="form-input"
+      >
+        {TIME_MINUTES.map((minute) => (
+          <option key={minute} value={minute}>
+            {String(minute).padStart(2, "0")}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label={`${label} AM or PM`}
+        value={parts.period}
+        onChange={(event) => update({ period: event.target.value as TimePeriod })}
+        className="form-input"
+      >
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </span>
+  );
 }
 
 export default function InternshipClient({ userId }: { userId: string }) {
@@ -843,22 +936,18 @@ export default function InternshipClient({ userId }: { userId: string }) {
                     <>
                       <label className="text-sm font-bold text-[var(--ink-soft)]">
                         Clock in
-                        <input
-                          type="time"
+                        <StandardTimeInput
+                          label="Clock in"
                           value={clockIn}
-                          onChange={(event) => setClockIn(event.target.value)}
-                          required
-                          className="form-input mt-2"
+                          onChange={setClockIn}
                         />
                       </label>
                       <label className="text-sm font-bold text-[var(--ink-soft)]">
                         Clock out
-                        <input
-                          type="time"
+                        <StandardTimeInput
+                          label="Clock out"
                           value={clockOut}
-                          onChange={(event) => setClockOut(event.target.value)}
-                          required
-                          className="form-input mt-2"
+                          onChange={setClockOut}
                         />
                       </label>
                     </>
@@ -1035,7 +1124,7 @@ export default function InternshipClient({ userId }: { userId: string }) {
                         <p className="mt-1 text-xs text-[var(--muted)]">
                           {entry.status === "absent"
                             ? "Absent · 0h 0m"
-                            : `${dayClassification.label} · ${entry.clockIn}–${entry.clockOut} · ${formatDuration(
+                            : `${dayClassification.label} · ${formatStandardTime(entry.clockIn)}–${formatStandardTime(entry.clockOut)} · ${formatDuration(
                                 creditedMinutes,
                               )} credited`}
                         </p>
